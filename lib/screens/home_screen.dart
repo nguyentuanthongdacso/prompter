@@ -8,6 +8,7 @@ import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import '../models/prompter_settings.dart';
 import '../widgets/text_preview.dart';
 import '../widgets/color_picker_dialog.dart';
+import '../services/native_overlay_service.dart';
 import 'prompter_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -39,7 +40,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   Future<void> _checkOverlayPermission() async {
     if (_isAndroid) {
-      final status = await FlutterOverlayWindow.isPermissionGranted();
+      // Check using native service
+      final status = await NativeOverlayService.checkPermission();
       setState(() {
         _hasOverlayPermission = status;
       });
@@ -48,10 +50,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   Future<void> _requestOverlayPermission() async {
     if (_isAndroid) {
-      final status = await FlutterOverlayWindow.requestPermission();
-      setState(() {
-        _hasOverlayPermission = status ?? false;
-      });
+      await NativeOverlayService.requestPermission();
+      // Re-check after requesting
+      await Future.delayed(const Duration(milliseconds: 500));
+      await _checkOverlayPermission();
     }
   }
 
@@ -79,44 +81,27 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
     final settings = Provider.of<PrompterSettings>(context, listen: false);
     
-    // Start the overlay - FULLSCREEN with transparent background
-    await FlutterOverlayWindow.showOverlay(
-      enableDrag: false,
-      height: WindowSize.fullCover,
-      width: WindowSize.matchParent,
-      alignment: OverlayAlignment.center,
-      positionGravity: PositionGravity.none,
-      overlayTitle: "Prompter",
-      overlayContent: "Đang chạy chữ...",
-      flag: OverlayFlag.clickThrough, // Allow clicks to pass through
-      visibility: NotificationVisibility.visibilityPublic,
+    // Use native 2-layer overlay service
+    await NativeOverlayService.showOverlay(
+      text: settings.text,
+      fontSize: settings.fontSize,
+      textColor: settings.textColor.toARGB32(),
+      speed: settings.scrollSpeed.toInt(),
     );
-
-    // Small delay to ensure overlay is ready
-    await Future.delayed(const Duration(milliseconds: 500));
-
-    // Send settings to overlay
-    await FlutterOverlayWindow.shareData({
-      'text': settings.text,
-      'scrollSpeed': settings.scrollSpeed,
-      'fontFamily': settings.fontFamily,
-      'fontSize': settings.fontSize,
-      'isBold': settings.isBold,
-      'isItalic': settings.isItalic,
-      'textColor': settings.textColor.value,
-      'backgroundColor': settings.backgroundColor.value,
-      'opacity': settings.opacity,
-      'mirrorHorizontal': settings.mirrorHorizontal,
-      'lineHeight': settings.lineHeight,
-      'textAlign': settings.textAlign.index,
-      'paddingHorizontal': settings.paddingHorizontal,
-    });
+    
+    // Minimize app to show overlay
+    if (mounted) {
+      // Move app to background
+      SystemNavigator.pop();
+    }
   }
 
   Future<void> _requestAndStartOverlay() async {
     if (_isAndroid) {
-      final status = await FlutterOverlayWindow.requestPermission();
-      if (status == true) {
+      await NativeOverlayService.requestPermission();
+      await Future.delayed(const Duration(milliseconds: 500));
+      final hasPermission = await NativeOverlayService.checkPermission();
+      if (hasPermission) {
         setState(() {
           _hasOverlayPermission = true;
         });
