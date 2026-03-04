@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 // Vị trí dải overlay trên màn hình
 enum OverlayStripPosition { top, center, bottom }
@@ -106,7 +107,7 @@ class PrompterSettings extends ChangeNotifier {
   }
 
   void setOpacity(double value) {
-    _opacity = value.clamp(0.1, 1.0);
+    _opacity = value.clamp(0.0, 1.0);
     notifyListeners();
   }
 
@@ -121,24 +122,45 @@ class PrompterSettings extends ChangeNotifier {
   }
 
   void setOverlayHeight(double value) {
-    _overlayHeight = value.clamp(80.0, 400.0);
+    _overlayHeight = value.clamp(80.0, 700.0);
     notifyListeners();
   }
 
+  // System fonts that don't need Google Fonts
+  static const _systemFonts = ['Arial', 'Times New Roman'];
+
   // Get TextStyle based on current settings
   TextStyle getTextStyle() {
-    return TextStyle(
-      fontFamily: _fontFamily,
+    final baseStyle = TextStyle(
       fontSize: _fontSize,
       fontWeight: _isBold ? FontWeight.bold : FontWeight.normal,
       fontStyle: _isItalic ? FontStyle.italic : FontStyle.normal,
       color: _textColor,
       height: _lineHeight,
     );
+
+    if (_systemFonts.contains(_fontFamily)) {
+      return baseStyle.copyWith(fontFamily: _fontFamily);
+    }
+
+    try {
+      return GoogleFonts.getFont(
+        _fontFamily,
+        fontSize: _fontSize,
+        fontWeight: _isBold ? FontWeight.bold : FontWeight.normal,
+        fontStyle: _isItalic ? FontStyle.italic : FontStyle.normal,
+        color: _textColor,
+        height: _lineHeight,
+      );
+    } catch (e) {
+      return baseStyle;
+    }
   }
 
   // Available fonts
   static List<String> get availableFonts => [
+    'Arial',
+    'Times New Roman',
     'Roboto',
     'Open Sans',
     'Lato',

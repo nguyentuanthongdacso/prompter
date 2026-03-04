@@ -1,6 +1,7 @@
 package com.ntt55.prompter
 
 import android.content.Intent
+import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -40,17 +41,37 @@ class MainActivity : FlutterActivity() {
                 "showOverlay" -> {
                     val text = call.argument<String>("text") ?: "No text"
                     val fontSize = call.argument<Double>("fontSize")?.toFloat() ?: 24f
-                    val textColor = (call.argument<Long>("textColor") ?: 0xFF000000L).toInt()
+                    val textColor = (call.argument<Number>("textColor")?.toInt()) ?: Color.BLACK
+                    val bgColor = (call.argument<Number>("backgroundColor")?.toInt()) ?: Color.TRANSPARENT
                     val speed = (call.argument<Number>("speed")?.toInt()) ?: 50
                     val mirrorHorizontal = call.argument<Boolean>("mirrorHorizontal") ?: false
+                    val fontFamily = call.argument<String>("fontFamily") ?: "Roboto"
+                    val isBold = call.argument<Boolean>("isBold") ?: false
+                    val isItalic = call.argument<Boolean>("isItalic") ?: false
+                    val lineHeight = call.argument<Double>("lineHeight")?.toFloat() ?: 1.5f
+                    val textAlign = (call.argument<Number>("textAlign")?.toInt()) ?: 1
+                    val opacity = call.argument<Double>("opacity")?.toFloat() ?: 0f
+                    val paddingH = call.argument<Double>("paddingHorizontal")?.toFloat() ?: 20f
+                    val overlayPos = (call.argument<Number>("overlayPosition")?.toInt()) ?: 2
+                    val overlayHeight = call.argument<Double>("overlayHeight")?.toFloat() ?: 150f
                     
                     val intent = Intent(this, PrompterOverlayService::class.java).apply {
                         action = PrompterOverlayService.ACTION_SHOW
                         putExtra(PrompterOverlayService.EXTRA_TEXT, text)
                         putExtra(PrompterOverlayService.EXTRA_FONT_SIZE, fontSize)
                         putExtra(PrompterOverlayService.EXTRA_TEXT_COLOR, textColor)
+                        putExtra(PrompterOverlayService.EXTRA_BG_COLOR, bgColor)
                         putExtra(PrompterOverlayService.EXTRA_SPEED, speed)
                         putExtra(PrompterOverlayService.EXTRA_MIRROR, mirrorHorizontal)
+                        putExtra(PrompterOverlayService.EXTRA_FONT_FAMILY, fontFamily)
+                        putExtra(PrompterOverlayService.EXTRA_IS_BOLD, isBold)
+                        putExtra(PrompterOverlayService.EXTRA_IS_ITALIC, isItalic)
+                        putExtra(PrompterOverlayService.EXTRA_LINE_HEIGHT, lineHeight)
+                        putExtra(PrompterOverlayService.EXTRA_TEXT_ALIGN, textAlign)
+                        putExtra(PrompterOverlayService.EXTRA_OPACITY, opacity)
+                        putExtra(PrompterOverlayService.EXTRA_PADDING_H, paddingH)
+                        putExtra(PrompterOverlayService.EXTRA_OVERLAY_POS, overlayPos)
+                        putExtra(PrompterOverlayService.EXTRA_OVERLAY_HEIGHT, overlayHeight)
                     }
                     
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -78,6 +99,57 @@ class MainActivity : FlutterActivity() {
                     }
                     startService(intent)
                     result.success(true)
+                }
+                
+                "updateSettings" -> {
+                    val text = call.argument<String>("text") ?: "No text"
+                    val fontSize = call.argument<Double>("fontSize")?.toFloat() ?: 24f
+                    val textColor = (call.argument<Number>("textColor")?.toInt()) ?: Color.BLACK
+                    val bgColor = (call.argument<Number>("backgroundColor")?.toInt()) ?: Color.TRANSPARENT
+                    val speed = (call.argument<Number>("speed")?.toInt()) ?: 50
+                    val mirrorHorizontal = call.argument<Boolean>("mirrorHorizontal") ?: false
+                    val fontFamily = call.argument<String>("fontFamily") ?: "Roboto"
+                    val isBold = call.argument<Boolean>("isBold") ?: false
+                    val isItalic = call.argument<Boolean>("isItalic") ?: false
+                    val lineHeight = call.argument<Double>("lineHeight")?.toFloat() ?: 1.5f
+                    val textAlign = (call.argument<Number>("textAlign")?.toInt()) ?: 1
+                    val opacity = call.argument<Double>("opacity")?.toFloat() ?: 0f
+                    val paddingH = call.argument<Double>("paddingHorizontal")?.toFloat() ?: 20f
+                    val overlayPos = (call.argument<Number>("overlayPosition")?.toInt()) ?: 2
+                    val overlayHeight = call.argument<Double>("overlayHeight")?.toFloat() ?: 150f
+                    
+                    val intent = Intent(this, PrompterOverlayService::class.java).apply {
+                        action = PrompterOverlayService.ACTION_UPDATE_SETTINGS
+                        putExtra(PrompterOverlayService.EXTRA_TEXT, text)
+                        putExtra(PrompterOverlayService.EXTRA_FONT_SIZE, fontSize)
+                        putExtra(PrompterOverlayService.EXTRA_TEXT_COLOR, textColor)
+                        putExtra(PrompterOverlayService.EXTRA_BG_COLOR, bgColor)
+                        putExtra(PrompterOverlayService.EXTRA_SPEED, speed)
+                        putExtra(PrompterOverlayService.EXTRA_MIRROR, mirrorHorizontal)
+                        putExtra(PrompterOverlayService.EXTRA_FONT_FAMILY, fontFamily)
+                        putExtra(PrompterOverlayService.EXTRA_IS_BOLD, isBold)
+                        putExtra(PrompterOverlayService.EXTRA_IS_ITALIC, isItalic)
+                        putExtra(PrompterOverlayService.EXTRA_LINE_HEIGHT, lineHeight)
+                        putExtra(PrompterOverlayService.EXTRA_TEXT_ALIGN, textAlign)
+                        putExtra(PrompterOverlayService.EXTRA_OPACITY, opacity)
+                        putExtra(PrompterOverlayService.EXTRA_PADDING_H, paddingH)
+                        putExtra(PrompterOverlayService.EXTRA_OVERLAY_POS, overlayPos)
+                        putExtra(PrompterOverlayService.EXTRA_OVERLAY_HEIGHT, overlayHeight)
+                    }
+                    startService(intent)
+                    result.success(true)
+                }
+                
+                "isOverlayRunning" -> {
+                    result.success(PrompterOverlayService.isRunning)
+                }
+                
+                "getOverlayState" -> {
+                    val state = mapOf(
+                        "speed" to PrompterOverlayService.currentSpeed,
+                        "textColor" to PrompterOverlayService.currentColor
+                    )
+                    result.success(state)
                 }
                 
                 "moveToBackground" -> {

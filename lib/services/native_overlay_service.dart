@@ -23,21 +23,41 @@ class NativeOverlayService {
     }
   }
   
-  /// Show the overlay with text
+  /// Show the overlay with all settings
   static Future<bool> showOverlay({
     required String text,
     double fontSize = 32.0,
-    int textColor = 0xFF000000, // Black
+    int textColor = 0xFF000000,
+    int backgroundColor = 0x00000000,
     int speed = 50,
     bool mirrorHorizontal = false,
+    String fontFamily = 'Roboto',
+    bool isBold = false,
+    bool isItalic = false,
+    double lineHeight = 1.5,
+    int textAlign = 1, // 0=left, 1=center, 2=right
+    double opacity = 0.0,
+    double paddingHorizontal = 20.0,
+    int overlayPosition = 2, // 0=top, 1=center, 2=bottom
+    double overlayHeight = 150.0,
   }) async {
     try {
       final bool result = await _channel.invokeMethod('showOverlay', {
         'text': text,
         'fontSize': fontSize,
         'textColor': textColor,
+        'backgroundColor': backgroundColor,
         'speed': speed,
         'mirrorHorizontal': mirrorHorizontal,
+        'fontFamily': fontFamily,
+        'isBold': isBold,
+        'isItalic': isItalic,
+        'lineHeight': lineHeight,
+        'textAlign': textAlign,
+        'opacity': opacity,
+        'paddingHorizontal': paddingHorizontal,
+        'overlayPosition': overlayPosition,
+        'overlayHeight': overlayHeight,
       });
       return result;
     } catch (e) {
@@ -64,6 +84,71 @@ class NativeOverlayService {
       return result;
     } catch (e) {
       return false;
+    }
+  }
+
+  /// Update all overlay settings live (rebuilds overlay view)
+  static Future<bool> updateSettings({
+    required String text,
+    double fontSize = 32.0,
+    int textColor = 0xFF000000,
+    int backgroundColor = 0x00000000,
+    int speed = 50,
+    bool mirrorHorizontal = false,
+    String fontFamily = 'Roboto',
+    bool isBold = false,
+    bool isItalic = false,
+    double lineHeight = 1.5,
+    int textAlign = 1,
+    double opacity = 0.0,
+    double paddingHorizontal = 20.0,
+    int overlayPosition = 2,
+    double overlayHeight = 150.0,
+  }) async {
+    try {
+      final bool result = await _channel.invokeMethod('updateSettings', {
+        'text': text,
+        'fontSize': fontSize,
+        'textColor': textColor,
+        'backgroundColor': backgroundColor,
+        'speed': speed,
+        'mirrorHorizontal': mirrorHorizontal,
+        'fontFamily': fontFamily,
+        'isBold': isBold,
+        'isItalic': isItalic,
+        'lineHeight': lineHeight,
+        'textAlign': textAlign,
+        'opacity': opacity,
+        'paddingHorizontal': paddingHorizontal,
+        'overlayPosition': overlayPosition,
+        'overlayHeight': overlayHeight,
+      });
+      return result;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /// Check if overlay is currently running
+  static Future<bool> isOverlayRunning() async {
+    try {
+      final bool result = await _channel.invokeMethod('isOverlayRunning');
+      return result;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /// Get current overlay state (speed, textColor changed from overlay controls)
+  static Future<Map<String, dynamic>?> getOverlayState() async {
+    try {
+      final result = await _channel.invokeMethod('getOverlayState');
+      if (result is Map) {
+        return Map<String, dynamic>.from(result);
+      }
+      return null;
+    } catch (e) {
+      return null;
     }
   }
 }

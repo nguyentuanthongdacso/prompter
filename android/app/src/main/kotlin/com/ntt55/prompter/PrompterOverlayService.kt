@@ -51,6 +51,7 @@ class PrompterOverlayService : Service() {
         const val ACTION_SHOW = "com.example.prompter.SHOW"
         const val ACTION_HIDE = "com.example.prompter.HIDE"
         const val ACTION_UPDATE_TEXT = "com.example.prompter.UPDATE_TEXT"
+        const val ACTION_UPDATE_SETTINGS = "com.example.prompter.UPDATE_SETTINGS"
         const val ACTION_PLAY_PAUSE = "com.example.prompter.PLAY_PAUSE"
         const val ACTION_SPEED_UP = "com.example.prompter.SPEED_UP"
         const val ACTION_SPEED_DOWN = "com.example.prompter.SPEED_DOWN"
@@ -60,8 +61,26 @@ class PrompterOverlayService : Service() {
         const val EXTRA_TEXT = "text"
         const val EXTRA_FONT_SIZE = "fontSize"
         const val EXTRA_TEXT_COLOR = "textColor"
+        const val EXTRA_BG_COLOR = "backgroundColor"
         const val EXTRA_SPEED = "speed"
         const val EXTRA_MIRROR = "mirrorHorizontal"
+        const val EXTRA_FONT_FAMILY = "fontFamily"
+        const val EXTRA_IS_BOLD = "isBold"
+        const val EXTRA_IS_ITALIC = "isItalic"
+        const val EXTRA_LINE_HEIGHT = "lineHeight"
+        const val EXTRA_TEXT_ALIGN = "textAlign"
+        const val EXTRA_OPACITY = "opacity"
+        const val EXTRA_PADDING_H = "paddingHorizontal"
+        const val EXTRA_OVERLAY_POS = "overlayPosition"
+        const val EXTRA_OVERLAY_HEIGHT = "overlayHeight"
+        
+        // Static state for overlay→app sync
+        var isRunning = false
+            private set
+        var currentSpeed = 50
+            private set
+        var currentColor = Color.BLACK
+            private set
     }
     
     override fun onBind(intent: Intent?): IBinder? = null
@@ -79,12 +98,61 @@ class PrompterOverlayService : Service() {
                 val text = intent.getStringExtra(EXTRA_TEXT) ?: "No text"
                 val fontSize = intent.getFloatExtra(EXTRA_FONT_SIZE, 24f)
                 val textColor = intent.getIntExtra(EXTRA_TEXT_COLOR, Color.BLACK)
+                val bgColor = intent.getIntExtra(EXTRA_BG_COLOR, Color.TRANSPARENT)
                 scrollSpeed = intent.getIntExtra(EXTRA_SPEED, 50)
                 val mirror = intent.getBooleanExtra(EXTRA_MIRROR, false)
-                showOverlay(text, fontSize, textColor, mirror)
+                val fontFamily = intent.getStringExtra(EXTRA_FONT_FAMILY) ?: "Roboto"
+                val isBold = intent.getBooleanExtra(EXTRA_IS_BOLD, false)
+                val isItalic = intent.getBooleanExtra(EXTRA_IS_ITALIC, false)
+                val lineHeight = intent.getFloatExtra(EXTRA_LINE_HEIGHT, 1.5f)
+                val textAlign = intent.getIntExtra(EXTRA_TEXT_ALIGN, 1)
+                val opacity = intent.getFloatExtra(EXTRA_OPACITY, 0f)
+                val paddingH = intent.getFloatExtra(EXTRA_PADDING_H, 20f)
+                val overlayPos = intent.getIntExtra(EXTRA_OVERLAY_POS, 2)
+                val overlayHeight = intent.getFloatExtra(EXTRA_OVERLAY_HEIGHT, 150f)
+                currentTextColor = textColor
+                isRunning = true
+                currentSpeed = scrollSpeed
+                currentColor = textColor
+                showOverlay(text, fontSize, textColor, bgColor, mirror, fontFamily, isBold, isItalic, lineHeight, textAlign, opacity, paddingH, overlayPos, overlayHeight)
                 startForeground(NOTIFICATION_ID, createNotification())
             }
+            ACTION_UPDATE_SETTINGS -> {
+                val text = intent.getStringExtra(EXTRA_TEXT) ?: "No text"
+                val fontSize = intent.getFloatExtra(EXTRA_FONT_SIZE, 24f)
+                val textColor = intent.getIntExtra(EXTRA_TEXT_COLOR, Color.BLACK)
+                val bgColor = intent.getIntExtra(EXTRA_BG_COLOR, Color.TRANSPARENT)
+                scrollSpeed = intent.getIntExtra(EXTRA_SPEED, 50)
+                val mirror = intent.getBooleanExtra(EXTRA_MIRROR, false)
+                val fontFamily = intent.getStringExtra(EXTRA_FONT_FAMILY) ?: "Roboto"
+                val isBold = intent.getBooleanExtra(EXTRA_IS_BOLD, false)
+                val isItalic = intent.getBooleanExtra(EXTRA_IS_ITALIC, false)
+                val lineHeight = intent.getFloatExtra(EXTRA_LINE_HEIGHT, 1.5f)
+                val textAlign = intent.getIntExtra(EXTRA_TEXT_ALIGN, 1)
+                val opacity = intent.getFloatExtra(EXTRA_OPACITY, 0f)
+                val paddingH = intent.getFloatExtra(EXTRA_PADDING_H, 20f)
+                val overlayPos = intent.getIntExtra(EXTRA_OVERLAY_POS, 2)
+                val overlayHeight = intent.getFloatExtra(EXTRA_OVERLAY_HEIGHT, 150f)
+                currentTextColor = textColor
+                currentSpeed = scrollSpeed
+                currentColor = textColor
+                // Save scroll position, rebuild overlay, restore position
+                val savedScroll = (textOverlayView as? ScrollView)?.scrollY ?: 0
+                val wasPlaying = isPlaying
+                hideOverlay()
+                showOverlay(text, fontSize, textColor, bgColor, mirror, fontFamily, isBold, isItalic, lineHeight, textAlign, opacity, paddingH, overlayPos, overlayHeight)
+                // Restore scroll position
+                (textOverlayView as? ScrollView)?.post {
+                    (textOverlayView as? ScrollView)?.scrollTo(0, savedScroll)
+                }
+                if (!wasPlaying) {
+                    stopScrolling()
+                    isPlaying = false
+                    controlPanelView?.findViewWithTag<TextView>("playPauseBtn")?.text = "▶"
+                }
+            }
             ACTION_HIDE -> {
+                isRunning = false
                 hideOverlay()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
@@ -102,26 +170,45 @@ class PrompterOverlayService : Service() {
         return START_STICKY
     }
     
-    private fun showOverlay(text: String, fontSize: Float, textColor: Int, mirror: Boolean = false) {
+    private fun showOverlay(
+        text: String, fontSize: Float, textColor: Int, bgColor: Int = Color.TRANSPARENT,
+        mirror: Boolean = false, fontFamily: String = "Roboto",
+        isBold: Boolean = false, isItalic: Boolean = false,
+        lineHeight: Float = 1.5f, textAlign: Int = 1,
+        opacity: Float = 0f, paddingH: Float = 20f,
+        overlayPos: Int = 2, overlayHeight: Float = 150f
+    ) {
         if (textOverlayView != null) return
         
+        val density = resources.displayMetrics.density
+        val heightPx = (overlayHeight * density).toInt()
+        
         // === Layer 1: Text Overlay (Click-through) ===
-        textOverlayView = createTextOverlayView(text, fontSize, textColor, mirror)
+        textOverlayView = createTextOverlayView(
+            text, fontSize, textColor, bgColor, mirror, fontFamily,
+            isBold, isItalic, lineHeight, textAlign, opacity, paddingH
+        )
+        
+        // Overlay position gravity
+        val posGravity = when (overlayPos) {
+            0 -> Gravity.TOP      // top
+            1 -> Gravity.CENTER_VERTICAL  // center
+            else -> Gravity.BOTTOM // bottom (default)
+        }
         
         val textParams = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.MATCH_PARENT,
+            heightPx,
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) 
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY 
             else 
                 WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or  // Click-through!
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         )
-        textParams.gravity = Gravity.TOP or Gravity.START
+        textParams.gravity = posGravity or Gravity.CENTER_HORIZONTAL
         
         windowManager.addView(textOverlayView, textParams)
         
@@ -150,12 +237,54 @@ class PrompterOverlayService : Service() {
         startScrolling()
     }
     
-    private fun createTextOverlayView(text: String, fontSize: Float, textColor: Int, mirror: Boolean = false): View {
+    private fun createTextOverlayView(
+        text: String, fontSize: Float, textColor: Int, bgColor: Int = Color.TRANSPARENT,
+        mirror: Boolean = false, fontFamily: String = "Roboto",
+        isBold: Boolean = false, isItalic: Boolean = false,
+        lineHeight: Float = 1.5f, textAlign: Int = 1,
+        opacity: Float = 0f, paddingH: Float = 20f
+    ): View {
+        val density = resources.displayMetrics.density
+        val paddingPx = (paddingH * density).toInt()
+        val vertPadding = (16 * density).toInt()
+        
+        // Calculate background color with opacity
+        val bgR = Color.red(bgColor)
+        val bgG = Color.green(bgColor)
+        val bgB = Color.blue(bgColor)
+        val bgAlpha = (opacity * 255).toInt().coerceIn(0, 255)
+        val finalBgColor = Color.argb(bgAlpha, bgR, bgG, bgB)
+        
+        // Map textAlign: Flutter TextAlign enum indices
+        // 0=left, 1=right, 2=center, 3=justify, 4=start, 5=end
+        val gravityAlign = when (textAlign) {
+            0 -> Gravity.START
+            1 -> Gravity.END
+            2 -> Gravity.CENTER_HORIZONTAL
+            3 -> Gravity.CENTER_HORIZONTAL
+            else -> Gravity.CENTER_HORIZONTAL
+        }
+        
+        // Typeface: bold/italic
+        val typefaceStyle = when {
+            isBold && isItalic -> android.graphics.Typeface.BOLD_ITALIC
+            isBold -> android.graphics.Typeface.BOLD
+            isItalic -> android.graphics.Typeface.ITALIC
+            else -> android.graphics.Typeface.NORMAL
+        }
+        
+        // Font family typeface
+        val typeface = try {
+            android.graphics.Typeface.create(fontFamily, typefaceStyle)
+        } catch (e: Exception) {
+            android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, typefaceStyle)
+        }
+        
         val scrollView = ScrollView(this).apply {
             id = View.generateViewId()
-            setBackgroundColor(Color.TRANSPARENT)
+            setBackgroundColor(finalBgColor)
             isVerticalScrollBarEnabled = false
-            // Apply horizontal mirror if enabled
+            isFillViewport = true
             if (mirror) {
                 scaleX = -1f
             }
@@ -165,15 +294,17 @@ class PrompterOverlayService : Service() {
             this.text = text
             this.textSize = fontSize
             this.setTextColor(textColor)
-            this.setPadding(48, 200, 48, 200)
-            this.gravity = Gravity.CENTER_HORIZONTAL
-            this.setLineSpacing(8f, 1.2f)
-            // Add text shadow for better visibility
-            this.setShadowLayer(4f, 2f, 2f, Color.WHITE)
+            this.typeface = typeface
+            this.setPadding(paddingPx, vertPadding, paddingPx, vertPadding)
+            this.gravity = gravityAlign
+            this.setLineSpacing(0f, lineHeight)
+            // Shadow for visibility
+            val shadowColor = if (textColor == Color.WHITE || textColor == Color.YELLOW) Color.BLACK else Color.WHITE
+            this.setShadowLayer(4f, 2f, 2f, shadowColor)
         }
         
         scrollView.addView(textView)
-        scrollView.tag = textView // Store reference to TextView
+        scrollView.tag = textView
         
         return scrollView
     }
@@ -357,10 +488,12 @@ class PrompterOverlayService : Service() {
     
     private fun speedUp() {
         scrollSpeed = (scrollSpeed + 20).coerceAtMost(300)
+        currentSpeed = scrollSpeed
     }
     
     private fun speedDown() {
         scrollSpeed = (scrollSpeed - 20).coerceAtLeast(20)
+        currentSpeed = scrollSpeed
     }
     
     private fun scrollUp() {
@@ -373,6 +506,7 @@ class PrompterOverlayService : Service() {
     
     private fun changeTextColor(color: Int) {
         currentTextColor = color
+        currentColor = color
         (textOverlayView as? ScrollView)?.let { scrollView ->
             (scrollView.tag as? TextView)?.setTextColor(color)
             // Update shadow color for better contrast

@@ -18,16 +18,18 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateMixin {
+class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late TabController _tabController;
   late TextEditingController _textController;
   bool _hasOverlayPermission = false;
+  bool _isOverlayActive = false;
 
   bool get _isAndroid => !kIsWeb && Platform.isAndroid;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _tabController = TabController(length: 3, vsync: this);
     _textController = TextEditingController();
     
@@ -35,7 +37,63 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       final settings = Provider.of<PrompterSettings>(context, listen: false);
       _textController.text = settings.text;
       _checkOverlayPermission();
+      // Listen for settings changes to push live updates to overlay
+      settings.addListener(_onSettingsChanged);
     });
+  }
+
+  /// Push settings to overlay whenever they change in the app
+  void _onSettingsChanged() {
+    if (!_isOverlayActive) return;
+    final settings = Provider.of<PrompterSettings>(context, listen: false);
+    NativeOverlayService.updateSettings(
+      text: settings.text,
+      fontSize: settings.fontSize,
+      textColor: settings.textColor.toARGB32(),
+      backgroundColor: settings.backgroundColor.toARGB32(),
+      speed: settings.scrollSpeed.toInt(),
+      mirrorHorizontal: settings.mirrorHorizontal,
+      fontFamily: settings.fontFamily,
+      isBold: settings.isBold,
+      isItalic: settings.isItalic,
+      lineHeight: settings.lineHeight,
+      textAlign: settings.textAlign.index,
+      opacity: settings.opacity,
+      paddingHorizontal: settings.paddingHorizontal,
+      overlayPosition: settings.overlayPosition.index,
+      overlayHeight: settings.overlayHeight,
+    );
+  }
+
+  /// Sync overlay state back to app when resuming
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _isOverlayActive) {
+      _syncOverlayStateToApp();
+    }
+  }
+
+  Future<void> _syncOverlayStateToApp() async {
+    try {
+      final running = await NativeOverlayService.isOverlayRunning();
+      if (!running) {
+        setState(() => _isOverlayActive = false);
+        return;
+      }
+      final overlayState = await NativeOverlayService.getOverlayState();
+      if (overlayState != null && mounted) {
+        final settings = Provider.of<PrompterSettings>(context, listen: false);
+        // Temporarily remove listener to avoid feedback loop
+        settings.removeListener(_onSettingsChanged);
+        
+        final speed = overlayState['speed'] as int?;
+        final color = overlayState['textColor'] as int?;
+        if (speed != null) settings.setScrollSpeed(speed.toDouble());
+        if (color != null) settings.setTextColor(Color(color));
+        
+        settings.addListener(_onSettingsChanged);
+      }
+    } catch (_) {}
   }
 
   Future<void> _checkOverlayPermission() async {
@@ -59,6 +117,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    final settings = Provider.of<PrompterSettings>(context, listen: false);
+    settings.removeListener(_onSettingsChanged);
     _tabController.dispose();
     _textController.dispose();
     super.dispose();
@@ -81,14 +142,26 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
     final settings = Provider.of<PrompterSettings>(context, listen: false);
     
-    // Use native 2-layer overlay service
+    // Use native 2-layer overlay service with all settings
     await NativeOverlayService.showOverlay(
       text: settings.text,
       fontSize: settings.fontSize,
       textColor: settings.textColor.toARGB32(),
+      backgroundColor: settings.backgroundColor.toARGB32(),
       speed: settings.scrollSpeed.toInt(),
       mirrorHorizontal: settings.mirrorHorizontal,
+      fontFamily: settings.fontFamily,
+      isBold: settings.isBold,
+      isItalic: settings.isItalic,
+      lineHeight: settings.lineHeight,
+      textAlign: settings.textAlign.index,
+      opacity: settings.opacity,
+      paddingHorizontal: settings.paddingHorizontal,
+      overlayPosition: settings.overlayPosition.index,
+      overlayHeight: settings.overlayHeight,
     );
+    
+    setState(() => _isOverlayActive = true);
     
     // Minimize app to show overlay (move to background, don't kill)
     if (mounted) {
@@ -269,11 +342,16 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 ),
                 items: PrompterSettings.availableFonts.map((font) {
-                  TextStyle? fontStyle;
-                  try {
-                    fontStyle = GoogleFonts.getFont(font);
-                  } catch (e) {
-                    fontStyle = null;
+                  const systemFonts = ['Arial', 'Times New Roman'];
+                  TextStyle fontStyle;
+                  if (systemFonts.contains(font)) {
+                    fontStyle = TextStyle(fontFamily: font);
+                  } else {
+                    try {
+                      fontStyle = GoogleFonts.getFont(font);
+                    } catch (e) {
+                      fontStyle = const TextStyle();
+                    }
                   }
                   return DropdownMenuItem(
                     value: font,
@@ -480,8 +558,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               Slider(
                 value: settings.overlayHeight,
                 min: 80,
-                max: 400,
-                divisions: 32,
+                max: 700,
+                divisions: 62,
                 label: '${settings.overlayHeight.toInt()}px',
                 onChanged: (value) => settings.setOverlayHeight(value),
               ),
