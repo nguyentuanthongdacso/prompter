@@ -87,12 +87,13 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       fontSize: settings.fontSize,
       textColor: settings.textColor.toARGB32(),
       speed: settings.scrollSpeed.toInt(),
+      mirrorHorizontal: settings.mirrorHorizontal,
     );
     
-    // Minimize app to show overlay
+    // Minimize app to show overlay (move to background, don't kill)
     if (mounted) {
-      // Move app to background
-      SystemNavigator.pop();
+      await const MethodChannel('com.ntt55.prompter/overlay')
+          .invokeMethod('moveToBackground');
     }
   }
 
@@ -174,10 +175,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   ? () async {
                       Navigator.pop(context);
                       await _startOverlay();
-                      // Minimize app to background after starting overlay
-                      if (mounted) {
-                        await SystemChannels.platform.invokeMethod('SystemNavigator.pop');
-                      }
                     }
                   : null,
             ),
@@ -416,9 +413,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               _buildSectionTitle('Độ trong suốt: ${(settings.opacity * 100).toInt()}%'),
               Slider(
                 value: settings.opacity,
-                min: 0.1,
+                min: 0.0,
                 max: 1.0,
-                divisions: 9,
+                divisions: 10,
                 label: '${(settings.opacity * 100).toInt()}%',
                 onChanged: (value) => settings.setOpacity(value),
               ),

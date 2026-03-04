@@ -29,6 +29,7 @@ class NativeOverlayService {
     double fontSize = 32.0,
     int textColor = 0xFF000000, // Black
     int speed = 50,
+    bool mirrorHorizontal = false,
   }) async {
     try {
       final bool result = await _channel.invokeMethod('showOverlay', {
@@ -36,6 +37,7 @@ class NativeOverlayService {
         'fontSize': fontSize,
         'textColor': textColor,
         'speed': speed,
+        'mirrorHorizontal': mirrorHorizontal,
       });
       return result;
     } catch (e) {

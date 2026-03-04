@@ -42,6 +42,7 @@ class MainActivity : FlutterActivity() {
                     val fontSize = call.argument<Double>("fontSize")?.toFloat() ?: 24f
                     val textColor = (call.argument<Long>("textColor") ?: 0xFF000000L).toInt()
                     val speed = (call.argument<Number>("speed")?.toInt()) ?: 50
+                    val mirrorHorizontal = call.argument<Boolean>("mirrorHorizontal") ?: false
                     
                     val intent = Intent(this, PrompterOverlayService::class.java).apply {
                         action = PrompterOverlayService.ACTION_SHOW
@@ -49,6 +50,7 @@ class MainActivity : FlutterActivity() {
                         putExtra(PrompterOverlayService.EXTRA_FONT_SIZE, fontSize)
                         putExtra(PrompterOverlayService.EXTRA_TEXT_COLOR, textColor)
                         putExtra(PrompterOverlayService.EXTRA_SPEED, speed)
+                        putExtra(PrompterOverlayService.EXTRA_MIRROR, mirrorHorizontal)
                     }
                     
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -75,6 +77,11 @@ class MainActivity : FlutterActivity() {
                         putExtra(PrompterOverlayService.EXTRA_TEXT, text)
                     }
                     startService(intent)
+                    result.success(true)
+                }
+                
+                "moveToBackground" -> {
+                    moveTaskToBack(true)
                     result.success(true)
                 }
                 

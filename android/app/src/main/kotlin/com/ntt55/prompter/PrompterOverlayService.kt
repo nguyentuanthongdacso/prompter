@@ -61,6 +61,7 @@ class PrompterOverlayService : Service() {
         const val EXTRA_FONT_SIZE = "fontSize"
         const val EXTRA_TEXT_COLOR = "textColor"
         const val EXTRA_SPEED = "speed"
+        const val EXTRA_MIRROR = "mirrorHorizontal"
     }
     
     override fun onBind(intent: Intent?): IBinder? = null
@@ -79,7 +80,8 @@ class PrompterOverlayService : Service() {
                 val fontSize = intent.getFloatExtra(EXTRA_FONT_SIZE, 24f)
                 val textColor = intent.getIntExtra(EXTRA_TEXT_COLOR, Color.BLACK)
                 scrollSpeed = intent.getIntExtra(EXTRA_SPEED, 50)
-                showOverlay(text, fontSize, textColor)
+                val mirror = intent.getBooleanExtra(EXTRA_MIRROR, false)
+                showOverlay(text, fontSize, textColor, mirror)
                 startForeground(NOTIFICATION_ID, createNotification())
             }
             ACTION_HIDE -> {
@@ -100,11 +102,11 @@ class PrompterOverlayService : Service() {
         return START_STICKY
     }
     
-    private fun showOverlay(text: String, fontSize: Float, textColor: Int) {
+    private fun showOverlay(text: String, fontSize: Float, textColor: Int, mirror: Boolean = false) {
         if (textOverlayView != null) return
         
         // === Layer 1: Text Overlay (Click-through) ===
-        textOverlayView = createTextOverlayView(text, fontSize, textColor)
+        textOverlayView = createTextOverlayView(text, fontSize, textColor, mirror)
         
         val textParams = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
@@ -148,11 +150,15 @@ class PrompterOverlayService : Service() {
         startScrolling()
     }
     
-    private fun createTextOverlayView(text: String, fontSize: Float, textColor: Int): View {
+    private fun createTextOverlayView(text: String, fontSize: Float, textColor: Int, mirror: Boolean = false): View {
         val scrollView = ScrollView(this).apply {
             id = View.generateViewId()
             setBackgroundColor(Color.TRANSPARENT)
             isVerticalScrollBarEnabled = false
+            // Apply horizontal mirror if enabled
+            if (mirror) {
+                scaleX = -1f
+            }
         }
         
         val textView = TextView(this).apply {
