@@ -2,7 +2,7 @@ import 'package:flutter/services.dart';
 
 /// Service to communicate with native 2-layer overlay
 class NativeOverlayService {
-  static const MethodChannel _channel = MethodChannel('com.example.prompter/overlay');
+  static const MethodChannel _channel = MethodChannel('com.ntt55.prompter/overlay');
   
   /// Check if overlay permission is granted
   static Future<bool> checkPermission() async {
