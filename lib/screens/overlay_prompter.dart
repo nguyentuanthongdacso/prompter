@@ -17,20 +17,20 @@ class _OverlayPrompterState extends State<OverlayPrompter> {
   bool _showControls = true;
   bool _settingsReceived = false;
   
-  // Default settings - these would be passed from the main app
-  String _text = 'Đang chờ dữ liệu từ app chính...\n\nNếu bạn thấy dòng này, overlay đang hoạt động!';
+  // Default settings - black text on transparent background
+  String _text = 'Đang chờ dữ liệu từ app chính...';
   double _scrollSpeed = 50.0;
   String _fontFamily = 'Roboto';
-  double _fontSize = 24.0; // Smaller for strip overlay
-  bool _isBold = false;
+  double _fontSize = 32.0;
+  bool _isBold = true;
   bool _isItalic = false;
-  Color _textColor = Colors.white;
-  Color _backgroundColor = Colors.black;
-  double _opacity = 0.85; // More transparent
+  Color _textColor = Colors.black;
+  Color _backgroundColor = Colors.transparent;
+  double _opacity = 0.0; // Fully transparent background
   bool _mirrorHorizontal = false;
-  double _lineHeight = 1.3;
+  double _lineHeight = 1.5;
   TextAlign _textAlign = TextAlign.center;
-  double _paddingHorizontal = 16.0;
+  double _paddingHorizontal = 24.0;
 
   @override
   void initState() {
@@ -186,7 +186,7 @@ class _OverlayPrompterState extends State<OverlayPrompter> {
                   controller: _scrollController,
                   padding: EdgeInsets.symmetric(
                     horizontal: _paddingHorizontal,
-                    vertical: 16, // Smaller padding for strip overlay
+                    vertical: 80, // Space for control panel
                   ),
                   child: Text(
                     _text,
@@ -196,50 +196,57 @@ class _OverlayPrompterState extends State<OverlayPrompter> {
                 ),
               ),
 
-              // Controls
-              if (_showControls)
-                Positioned(
-                  top: 8,
-                  right: 8,
-                  child: Row(
+              // Floating Control Panel - bottom right
+              Positioned(
+                bottom: 100,
+                right: 16,
+                child: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.7),
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Speed display
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: Colors.black54,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          '${_scrollSpeed.toInt()} px/s',
-                          style: const TextStyle(color: Colors.white, fontSize: 12),
+                      // Scroll up
+                      _controlButton(
+                        Icons.keyboard_arrow_up,
+                        () => _scrollController.animateTo(
+                          (_scrollController.offset - 100).clamp(0, _scrollController.position.maxScrollExtent),
+                          duration: const Duration(milliseconds: 200),
+                          curve: Curves.easeOut,
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      // Speed down
-                      _miniButton(
-                        Icons.remove,
-                        () => setState(() => _scrollSpeed = (_scrollSpeed - 10).clamp(10, 200)),
-                      ),
-                      const SizedBox(width: 4),
+                      const SizedBox(height: 4),
                       // Play/Pause
-                      _miniButton(
+                      _controlButton(
                         _isPlaying ? Icons.pause : Icons.play_arrow,
                         _togglePlayPause,
+                        size: 32,
+                        highlight: true,
                       ),
-                      const SizedBox(width: 4),
-                      // Speed up
-                      _miniButton(
-                        Icons.add,
-                        () => setState(() => _scrollSpeed = (_scrollSpeed + 10).clamp(10, 200)),
+                      const SizedBox(height: 4),
+                      // Scroll down
+                      _controlButton(
+                        Icons.keyboard_arrow_down,
+                        () => _scrollController.animateTo(
+                          (_scrollController.offset + 100).clamp(0, _scrollController.position.maxScrollExtent),
+                          duration: const Duration(milliseconds: 200),
+                          curve: Curves.easeOut,
+                        ),
                       ),
-                      const SizedBox(width: 4),
-                      // Close
-                      _miniButton(Icons.close, _closeOverlay, color: Colors.red),
+                      const SizedBox(height: 8),
+                      // Close button
+                      _controlButton(
+                        Icons.close,
+                        _closeOverlay,
+                        color: Colors.red,
+                      ),
                     ],
                   ),
                 ),
+              ),
             ],
           ),
         ),
@@ -247,16 +254,17 @@ class _OverlayPrompterState extends State<OverlayPrompter> {
     );
   }
 
-  Widget _miniButton(IconData icon, VoidCallback onTap, {Color? color}) {
+  Widget _controlButton(IconData icon, VoidCallback onTap, {Color? color, double size = 24, bool highlight = false}) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.all(6),
+        padding: EdgeInsets.all(highlight ? 12 : 8),
         decoration: BoxDecoration(
-          color: color ?? Colors.black54,
+          color: color ?? (highlight ? Colors.white.withValues(alpha: 0.2) : Colors.transparent),
           shape: BoxShape.circle,
+          border: highlight ? Border.all(color: Colors.white, width: 2) : null,
         ),
-        child: Icon(icon, color: Colors.white, size: 18),
+        child: Icon(icon, color: Colors.white, size: size),
       ),
     );
   }

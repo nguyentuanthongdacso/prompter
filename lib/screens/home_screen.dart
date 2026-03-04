@@ -79,42 +79,17 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
     final settings = Provider.of<PrompterSettings>(context, listen: false);
     
-    // Get screen dimensions
-    final screenHeight = MediaQuery.of(context).size.height.toInt();
-    final screenWidth = MediaQuery.of(context).size.width.toInt();
-    
-    // Calculate overlay position and size based on settings
-    final overlayHeight = settings.overlayHeight.toInt();
-    int startY = 0;
-    OverlayAlignment alignment = OverlayAlignment.topLeft;
-    
-    switch (settings.overlayPosition) {
-      case OverlayStripPosition.top:
-        startY = 0;
-        alignment = OverlayAlignment.topCenter;
-        break;
-      case OverlayStripPosition.center:
-        startY = (screenHeight - overlayHeight) ~/ 2;
-        alignment = OverlayAlignment.center;
-        break;
-      case OverlayStripPosition.bottom:
-        startY = screenHeight - overlayHeight - 100; // Account for nav bar
-        alignment = OverlayAlignment.bottomCenter;
-        break;
-    }
-    
-    // Start the overlay - use clickThrough so camera can still be used
+    // Start the overlay - FULLSCREEN with transparent background
     await FlutterOverlayWindow.showOverlay(
-      enableDrag: true, // Allow dragging to reposition
-      height: overlayHeight,
-      width: screenWidth,
-      alignment: alignment,
+      enableDrag: false,
+      height: WindowSize.fullCover,
+      width: WindowSize.matchParent,
+      alignment: OverlayAlignment.center,
       positionGravity: PositionGravity.none,
       overlayTitle: "Prompter",
       overlayContent: "Đang chạy chữ...",
-      flag: OverlayFlag.clickThrough, // Allow clicks to pass through to camera
+      flag: OverlayFlag.clickThrough, // Allow clicks to pass through
       visibility: NotificationVisibility.visibilityPublic,
-      startPosition: OverlayPosition(0, startY.toDouble()),
     );
 
     // Small delay to ensure overlay is ready
