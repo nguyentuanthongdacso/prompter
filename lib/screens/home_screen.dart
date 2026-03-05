@@ -62,6 +62,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       paddingHorizontal: settings.paddingHorizontal,
       overlayPosition: settings.overlayPosition.index,
       overlayHeight: settings.overlayHeight,
+      scrollMode: settings.scrollMode.index,
     );
   }
 
@@ -70,6 +71,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && _isOverlayActive) {
       _syncOverlayStateToApp();
+    }
+    if (state == AppLifecycleState.detached && _isOverlayActive) {
+      NativeOverlayService.hideOverlay();
+      _isOverlayActive = false;
     }
   }
 
@@ -117,6 +122,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   @override
   void dispose() {
+    if (_isOverlayActive) {
+      NativeOverlayService.hideOverlay();
+    }
     WidgetsBinding.instance.removeObserver(this);
     final settings = Provider.of<PrompterSettings>(context, listen: false);
     settings.removeListener(_onSettingsChanged);
@@ -159,6 +167,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       paddingHorizontal: settings.paddingHorizontal,
       overlayPosition: settings.overlayPosition.index,
       overlayHeight: settings.overlayHeight,
+      scrollMode: settings.scrollMode.index,
     );
     
     setState(() => _isOverlayActive = true);
@@ -475,6 +484,28 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Scroll mode
+              _buildSectionTitle('Kiểu cuộn chữ'),
+              SegmentedButton<ScrollMode>(
+                segments: const [
+                  ButtonSegment(
+                    value: ScrollMode.vertical,
+                    label: Text('Dọc'),
+                    icon: Icon(Icons.vertical_distribute),
+                  ),
+                  ButtonSegment(
+                    value: ScrollMode.movieCredits,
+                    label: Text('Movie Credits'),
+                    icon: Icon(Icons.movie),
+                  ),
+                ],
+                selected: {settings.scrollMode},
+                onSelectionChanged: (Set<ScrollMode> selection) {
+                  settings.setScrollMode(selection.first);
+                },
+              ),
+              const SizedBox(height: 20),
+
               // Scroll speed
               _buildSectionTitle('Tốc độ cuộn: ${settings.scrollSpeed.toInt()} px/s'),
               Slider(

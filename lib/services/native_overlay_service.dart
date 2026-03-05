@@ -40,6 +40,7 @@ class NativeOverlayService {
     double paddingHorizontal = 20.0,
     int overlayPosition = 2, // 0=top, 1=center, 2=bottom
     double overlayHeight = 150.0,
+    int scrollMode = 0,
   }) async {
     try {
       final bool result = await _channel.invokeMethod('showOverlay', {
@@ -58,6 +59,7 @@ class NativeOverlayService {
         'paddingHorizontal': paddingHorizontal,
         'overlayPosition': overlayPosition,
         'overlayHeight': overlayHeight,
+        'scrollMode': scrollMode,
       });
       return result;
     } catch (e) {
@@ -104,6 +106,7 @@ class NativeOverlayService {
     double paddingHorizontal = 20.0,
     int overlayPosition = 2,
     double overlayHeight = 150.0,
+    int scrollMode = 0,
   }) async {
     try {
       final bool result = await _channel.invokeMethod('updateSettings', {
@@ -122,6 +125,7 @@ class NativeOverlayService {
         'paddingHorizontal': paddingHorizontal,
         'overlayPosition': overlayPosition,
         'overlayHeight': overlayHeight,
+        'scrollMode': scrollMode,
       });
       return result;
     } catch (e) {

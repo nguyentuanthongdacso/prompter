@@ -23,6 +23,10 @@ class _PrompterScreenState extends State<PrompterScreen> with WindowListener {
   double _currentSpeed = 50.0;
   bool _isAlwaysOnTop = false;
 
+  // Movie Credits mode state
+  double _movieCreditsOffset = 0.0;
+  double _mcCycleHeight = 0.0;
+
   bool get _isDesktop => !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
 
   @override
@@ -94,23 +98,37 @@ class _PrompterScreenState extends State<PrompterScreen> with WindowListener {
       });
     }
     
-    // Scroll every 16ms (~60fps)
-    _scrollTimer = Timer.periodic(const Duration(milliseconds: 16), (timer) {
-      if (_scrollController.hasClients && _isPlaying) {
-        final maxScroll = _scrollController.position.maxScrollExtent;
-        final currentScroll = _scrollController.offset;
-        
-        if (currentScroll >= maxScroll) {
-          // Reached the end
-          _pauseScrolling();
-          return;
+    final settings = Provider.of<PrompterSettings>(context, listen: false);
+    
+    if (settings.scrollMode == ScrollMode.movieCredits) {
+      // Movie Credits mode: animate offset for 3-line viewport
+      _scrollTimer = Timer.periodic(const Duration(milliseconds: 16), (timer) {
+        if (_isPlaying) {
+          setState(() {
+            _movieCreditsOffset += _currentSpeed / 60.0;
+            if (_mcCycleHeight > 0 && _movieCreditsOffset >= _mcCycleHeight) {
+              _movieCreditsOffset -= _mcCycleHeight;
+            }
+          });
         }
-        
-        // Calculate pixels per frame based on speed (pixels per second)
-        final pixelsPerFrame = _currentSpeed / 60.0;
-        _scrollController.jumpTo(currentScroll + pixelsPerFrame);
-      }
-    });
+      });
+    } else {
+      // Regular vertical scroll
+      _scrollTimer = Timer.periodic(const Duration(milliseconds: 16), (timer) {
+        if (_scrollController.hasClients && _isPlaying) {
+          final maxScroll = _scrollController.position.maxScrollExtent;
+          final currentScroll = _scrollController.offset;
+          
+          if (currentScroll >= maxScroll) {
+            _pauseScrolling();
+            return;
+          }
+          
+          final pixelsPerFrame = _currentSpeed / 60.0;
+          _scrollController.jumpTo(currentScroll + pixelsPerFrame);
+        }
+      });
+    }
   }
 
   void _pauseScrolling() {
@@ -129,7 +147,14 @@ class _PrompterScreenState extends State<PrompterScreen> with WindowListener {
   }
 
   void _resetScroll() {
-    _scrollController.jumpTo(0);
+    final settings = Provider.of<PrompterSettings>(context, listen: false);
+    if (settings.scrollMode == ScrollMode.movieCredits) {
+      setState(() {
+        _movieCreditsOffset = 0.0;
+      });
+    } else {
+      _scrollController.jumpTo(0);
+    }
     if (!_isPlaying) {
       _startScrolling();
     }
@@ -168,6 +193,84 @@ class _PrompterScreenState extends State<PrompterScreen> with WindowListener {
     }
   }
 
+  Widget _buildMovieCreditsContent(PrompterSettings settings, TextStyle textStyle) {
+    // Convert multi-line text to single continuous line for horizontal scrolling
+    final singleLineText = '${settings.text.replaceAll('\n', '     ')}     ';
+
+    return Transform(
+      alignment: Alignment.center,
+      transform: Matrix4.identity()
+        ..scale(settings.mirrorHorizontal ? -1.0 : 1.0, 1.0, 1.0),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final lineWidth = constraints.maxWidth - settings.paddingHorizontal * 2;
+
+          // Measure single line height
+          final linePainter = TextPainter(
+            text: TextSpan(text: 'Ág', style: textStyle),
+            textDirection: TextDirection.ltr,
+          )..layout();
+          final lineHeight = linePainter.height;
+
+          // Measure text width as single horizontal line
+          final textPainter = TextPainter(
+            text: TextSpan(text: singleLineText, style: textStyle),
+            maxLines: 1,
+            textDirection: TextDirection.ltr,
+          )..layout();
+          final textWidth = textPainter.width;
+
+          _mcCycleHeight = textWidth; // cycle = one full text width
+          if (textWidth <= 0) return const SizedBox();
+
+          final effectiveOffset = _movieCreditsOffset % textWidth;
+          final copies = (3 * lineWidth / textWidth).ceil() + 2;
+          final repeatedText = List.generate(copies, (_) => singleLineText).join();
+
+          return Center(
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: settings.paddingHorizontal),
+              child: SizedBox(
+                height: lineHeight * 3,
+                child: Column(
+                  children: [
+                    // Line 1 (top) — oldest text, exits here
+                    _buildCreditsLine(repeatedText, textStyle, lineWidth,
+                        effectiveOffset, lineHeight),
+                    // Line 2 (middle)
+                    _buildCreditsLine(repeatedText, textStyle, lineWidth,
+                        effectiveOffset + lineWidth, lineHeight),
+                    // Line 3 (bottom) — newest text, enters here
+                    _buildCreditsLine(repeatedText, textStyle, lineWidth,
+                        effectiveOffset + 2 * lineWidth, lineHeight),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildCreditsLine(String repeatedText, TextStyle style, double lineWidth,
+      double offset, double lineHeight) {
+    return SizedBox(
+      height: lineHeight,
+      width: lineWidth,
+      child: ClipRect(
+        child: OverflowBox(
+          maxWidth: double.infinity,
+          alignment: Alignment.centerLeft,
+          child: Transform.translate(
+            offset: Offset(-offset, 0),
+            child: Text(repeatedText, style: style, maxLines: 1, softWrap: false),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Consumer<PrompterSettings>(
@@ -198,24 +301,26 @@ class _PrompterScreenState extends State<PrompterScreen> with WindowListener {
                   ),
                   width: double.infinity,
                   height: double.infinity,
-                  child: Transform(
-                    alignment: Alignment.center,
-                    transform: Matrix4.identity()
-                      ..scale(settings.mirrorHorizontal ? -1.0 : 1.0, 1.0, 1.0),
-                    child: SingleChildScrollView(
-                      controller: _scrollController,
-                      physics: const NeverScrollableScrollPhysics(),
-                      padding: EdgeInsets.symmetric(
-                        horizontal: settings.paddingHorizontal,
-                        vertical: MediaQuery.of(context).size.height / 2,
-                      ),
-                      child: Text(
-                        settings.text,
-                        style: textStyle,
-                        textAlign: settings.textAlign,
-                      ),
-                    ),
-                  ),
+                  child: settings.scrollMode == ScrollMode.movieCredits
+                      ? _buildMovieCreditsContent(settings, textStyle)
+                      : Transform(
+                          alignment: Alignment.center,
+                          transform: Matrix4.identity()
+                            ..scale(settings.mirrorHorizontal ? -1.0 : 1.0, 1.0, 1.0),
+                          child: SingleChildScrollView(
+                            controller: _scrollController,
+                            physics: const NeverScrollableScrollPhysics(),
+                            padding: EdgeInsets.symmetric(
+                              horizontal: settings.paddingHorizontal,
+                              vertical: MediaQuery.of(context).size.height / 2,
+                            ),
+                            child: Text(
+                              settings.text,
+                              style: textStyle,
+                              textAlign: settings.textAlign,
+                            ),
+                          ),
+                        ),
                 ),
 
                 // Center line indicator

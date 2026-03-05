@@ -36,6 +36,14 @@ class PrompterOverlayService : Service() {
     private var scrollRunnable: Runnable? = null
     private var currentTextColor = Color.BLACK
     
+    // Movie Credits mode state
+    private var scrollMode = 0 // 0=vertical, 1=movieCredits
+    private var movieCreditsOffset = 0f
+    private var movieCreditsSingleWidth = 0f  // rendered width of one text copy
+    private var movieCreditsLaneWidth = 0     // width of one lane (screen width)
+    private var movieCreditsTextViews = mutableListOf<TextView>()
+    private var movieCreditsSingleText = ""
+    
     // Control panel position for dragging
     private var controlX = 0
     private var controlY = 0
@@ -73,6 +81,7 @@ class PrompterOverlayService : Service() {
         const val EXTRA_PADDING_H = "paddingHorizontal"
         const val EXTRA_OVERLAY_POS = "overlayPosition"
         const val EXTRA_OVERLAY_HEIGHT = "overlayHeight"
+        const val EXTRA_SCROLL_MODE = "scrollMode"
         
         // Static state for overlay→app sync
         var isRunning = false
@@ -110,11 +119,13 @@ class PrompterOverlayService : Service() {
                 val paddingH = intent.getFloatExtra(EXTRA_PADDING_H, 20f)
                 val overlayPos = intent.getIntExtra(EXTRA_OVERLAY_POS, 2)
                 val overlayHeight = intent.getFloatExtra(EXTRA_OVERLAY_HEIGHT, 150f)
+                val scrollModeVal = intent.getIntExtra(EXTRA_SCROLL_MODE, 0)
                 currentTextColor = textColor
                 isRunning = true
                 currentSpeed = scrollSpeed
                 currentColor = textColor
-                showOverlay(text, fontSize, textColor, bgColor, mirror, fontFamily, isBold, isItalic, lineHeight, textAlign, opacity, paddingH, overlayPos, overlayHeight)
+                scrollMode = scrollModeVal
+                showOverlay(text, fontSize, textColor, bgColor, mirror, fontFamily, isBold, isItalic, lineHeight, textAlign, opacity, paddingH, overlayPos, overlayHeight, scrollModeVal)
                 startForeground(NOTIFICATION_ID, createNotification())
             }
             ACTION_UPDATE_SETTINGS -> {
@@ -133,17 +144,23 @@ class PrompterOverlayService : Service() {
                 val paddingH = intent.getFloatExtra(EXTRA_PADDING_H, 20f)
                 val overlayPos = intent.getIntExtra(EXTRA_OVERLAY_POS, 2)
                 val overlayHeight = intent.getFloatExtra(EXTRA_OVERLAY_HEIGHT, 150f)
+                val scrollModeVal = intent.getIntExtra(EXTRA_SCROLL_MODE, 0)
                 currentTextColor = textColor
                 currentSpeed = scrollSpeed
                 currentColor = textColor
+                scrollMode = scrollModeVal
                 // Save scroll position, rebuild overlay, restore position
-                val savedScroll = (textOverlayView as? ScrollView)?.scrollY ?: 0
+                val savedScroll = if (scrollMode == 1) movieCreditsOffset else (textOverlayView as? ScrollView)?.scrollY?.toFloat() ?: 0f
                 val wasPlaying = isPlaying
                 hideOverlay()
-                showOverlay(text, fontSize, textColor, bgColor, mirror, fontFamily, isBold, isItalic, lineHeight, textAlign, opacity, paddingH, overlayPos, overlayHeight)
+                showOverlay(text, fontSize, textColor, bgColor, mirror, fontFamily, isBold, isItalic, lineHeight, textAlign, opacity, paddingH, overlayPos, overlayHeight, scrollModeVal)
                 // Restore scroll position
-                (textOverlayView as? ScrollView)?.post {
-                    (textOverlayView as? ScrollView)?.scrollTo(0, savedScroll)
+                if (scrollMode == 1) {
+                    movieCreditsOffset = savedScroll
+                } else {
+                    (textOverlayView as? ScrollView)?.post {
+                        (textOverlayView as? ScrollView)?.scrollTo(0, savedScroll.toInt())
+                    }
                 }
                 if (!wasPlaying) {
                     stopScrolling()
@@ -176,18 +193,32 @@ class PrompterOverlayService : Service() {
         isBold: Boolean = false, isItalic: Boolean = false,
         lineHeight: Float = 1.5f, textAlign: Int = 1,
         opacity: Float = 0f, paddingH: Float = 20f,
-        overlayPos: Int = 2, overlayHeight: Float = 150f
+        overlayPos: Int = 2, overlayHeight: Float = 150f,
+        scrollModeParam: Int = 0
     ) {
         if (textOverlayView != null) return
         
         val density = resources.displayMetrics.density
-        val heightPx = (overlayHeight * density).toInt()
+        
+        // Calculate height: for movie credits, use 3-line height
+        val heightPx = if (scrollModeParam == 1) {
+            calculateThreeLineHeight(fontSize, lineHeight, isBold, isItalic, fontFamily)
+        } else {
+            (overlayHeight * density).toInt()
+        }
         
         // === Layer 1: Text Overlay (Click-through) ===
-        textOverlayView = createTextOverlayView(
-            text, fontSize, textColor, bgColor, mirror, fontFamily,
-            isBold, isItalic, lineHeight, textAlign, opacity, paddingH
-        )
+        if (scrollModeParam == 1) {
+            textOverlayView = createMovieCreditsView(
+                text, fontSize, textColor, bgColor, mirror, fontFamily,
+                isBold, isItalic, lineHeight, textAlign, opacity, paddingH
+            )
+        } else {
+            textOverlayView = createTextOverlayView(
+                text, fontSize, textColor, bgColor, mirror, fontFamily,
+                isBold, isItalic, lineHeight, textAlign, opacity, paddingH
+            )
+        }
         
         // Overlay position gravity
         val posGravity = when (overlayPos) {
@@ -423,6 +454,7 @@ class PrompterOverlayService : Service() {
     private fun hideOverlay() {
         stopScrolling()
         hideColorPickerPopup()
+        movieCreditsTextViews.clear()
         
         textOverlayView?.let {
             try { windowManager.removeView(it) } catch (e: Exception) {}
@@ -436,8 +468,25 @@ class PrompterOverlayService : Service() {
     }
     
     private fun updateText(text: String) {
-        (textOverlayView as? ScrollView)?.let { scrollView ->
-            (scrollView.tag as? TextView)?.text = text
+        if (scrollMode == 1) {
+            // Movie credits: update single-line text and re-measure
+            movieCreditsSingleText = text.replace("\n", "     ") + "     "
+            if (movieCreditsTextViews.isNotEmpty()) {
+                val scaledDensity = resources.displayMetrics.scaledDensity
+                val paint = movieCreditsTextViews[0].paint
+                movieCreditsSingleWidth = paint.measureText(movieCreditsSingleText)
+                val repeatedText = buildRepeatedMovieCreditsText(movieCreditsSingleText, movieCreditsSingleWidth)
+                val repeatedWidth = (paint.measureText(repeatedText) + 1).toInt()
+                for (tv in movieCreditsTextViews) {
+                    tv.text = repeatedText
+                    tv.layoutParams.width = repeatedWidth
+                    tv.requestLayout()
+                }
+            }
+        } else {
+            (textOverlayView as? ScrollView)?.let { scrollView ->
+                (scrollView.tag as? TextView)?.text = text
+            }
         }
     }
     
@@ -456,6 +505,14 @@ class PrompterOverlayService : Service() {
     
     private fun startScrolling() {
         isPlaying = true
+        if (scrollMode == 1) {
+            startMovieCreditsScrolling()
+        } else {
+            startRegularScrolling()
+        }
+    }
+    
+    private fun startRegularScrolling() {
         scrollRunnable = object : Runnable {
             override fun run() {
                 if (isPlaying) {
@@ -464,22 +521,48 @@ class PrompterOverlayService : Service() {
                         val maxY = scrollView.getChildAt(0)?.height?.minus(scrollView.height) ?: 0
                         
                         if (currentY < maxY) {
-                            // Scroll step based on speed: higher speed = more pixels per step
                             val scrollStep = (scrollSpeed / 20).coerceIn(1, 15)
                             scrollView.scrollBy(0, scrollStep)
                         } else {
-                            // Reached end, stop
                             isPlaying = false
                             controlPanelView?.findViewWithTag<TextView>("playPauseBtn")?.text = "▶"
                             return
                         }
                     }
-                    // Fixed 33ms delay (~30fps) for smooth animation
                     scrollHandler?.postDelayed(this, 33L)
                 }
             }
         }
         scrollHandler?.post(scrollRunnable!!)
+    }
+    
+    private fun startMovieCreditsScrolling() {
+        scrollRunnable = object : Runnable {
+            override fun run() {
+                if (isPlaying) {
+                    if (movieCreditsSingleWidth > 0) {
+                        movieCreditsOffset += scrollSpeed / 30f
+                        if (movieCreditsOffset >= movieCreditsSingleWidth) {
+                            movieCreditsOffset -= movieCreditsSingleWidth
+                        }
+                        updateMovieCreditsPositions()
+                    }
+                    scrollHandler?.postDelayed(this, 33L)
+                }
+            }
+        }
+        scrollHandler?.post(scrollRunnable!!)
+    }
+    
+    private fun updateMovieCreditsPositions() {
+        if (movieCreditsSingleWidth <= 0 || movieCreditsLaneWidth <= 0) return
+        val effectiveOffset = movieCreditsOffset % movieCreditsSingleWidth
+        for (i in movieCreditsTextViews.indices) {
+            // i=0 is top (line 1, oldest), i=2 is bottom (line 3, newest)
+            // Single text flows: line 1 → line 2 → line 3
+            val lineOffset = effectiveOffset + i * movieCreditsLaneWidth
+            movieCreditsTextViews[i].translationX = -lineOffset
+        }
     }
     
     private fun stopScrolling() {
@@ -497,21 +580,46 @@ class PrompterOverlayService : Service() {
     }
     
     private fun scrollUp() {
-        (textOverlayView as? ScrollView)?.smoothScrollBy(0, -200)
+        if (scrollMode == 1) {
+            // Advance scroll (text moves faster)
+            movieCreditsOffset += 200f
+            if (movieCreditsSingleWidth > 0 && movieCreditsOffset >= movieCreditsSingleWidth) {
+                movieCreditsOffset -= movieCreditsSingleWidth
+            }
+            updateMovieCreditsPositions()
+        } else {
+            (textOverlayView as? ScrollView)?.smoothScrollBy(0, -200)
+        }
     }
     
     private fun scrollDown() {
-        (textOverlayView as? ScrollView)?.smoothScrollBy(0, 200)
+        if (scrollMode == 1) {
+            // Reverse scroll
+            movieCreditsOffset = (movieCreditsOffset - 200f)
+            if (movieCreditsOffset < 0 && movieCreditsSingleWidth > 0) {
+                movieCreditsOffset += movieCreditsSingleWidth
+            }
+            updateMovieCreditsPositions()
+        } else {
+            (textOverlayView as? ScrollView)?.smoothScrollBy(0, 200)
+        }
     }
     
     private fun changeTextColor(color: Int) {
         currentTextColor = color
         currentColor = color
-        (textOverlayView as? ScrollView)?.let { scrollView ->
-            (scrollView.tag as? TextView)?.setTextColor(color)
-            // Update shadow color for better contrast
+        if (scrollMode == 1) {
             val shadowColor = if (color == Color.WHITE || color == Color.YELLOW) Color.BLACK else Color.WHITE
-            (scrollView.tag as? TextView)?.setShadowLayer(4f, 2f, 2f, shadowColor)
+            for (tv in movieCreditsTextViews) {
+                tv.setTextColor(color)
+                tv.setShadowLayer(4f, 2f, 2f, shadowColor)
+            }
+        } else {
+            (textOverlayView as? ScrollView)?.let { scrollView ->
+                (scrollView.tag as? TextView)?.setTextColor(color)
+                val shadowColor = if (color == Color.WHITE || color == Color.YELLOW) Color.BLACK else Color.WHITE
+                (scrollView.tag as? TextView)?.setShadowLayer(4f, 2f, 2f, shadowColor)
+            }
         }
         // Close color picker popup
         hideColorPickerPopup()
@@ -670,6 +778,178 @@ class PrompterOverlayService : Service() {
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .build()
+    }
+    
+    // ============ Movie Credits Mode ============
+    
+    private fun calculateThreeLineHeight(
+        fontSize: Float, lineHeight: Float,
+        isBold: Boolean, isItalic: Boolean, fontFamily: String
+    ): Int {
+        val typefaceStyle = when {
+            isBold && isItalic -> android.graphics.Typeface.BOLD_ITALIC
+            isBold -> android.graphics.Typeface.BOLD
+            isItalic -> android.graphics.Typeface.ITALIC
+            else -> android.graphics.Typeface.NORMAL
+        }
+        val typeface = try {
+            android.graphics.Typeface.create(fontFamily, typefaceStyle)
+        } catch (e: Exception) {
+            android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, typefaceStyle)
+        }
+        val tempTv = TextView(this).apply {
+            text = "Ag\nAg\nAg"
+            textSize = fontSize
+            this.typeface = typeface
+            setLineSpacing(0f, lineHeight)
+        }
+        val widthSpec = View.MeasureSpec.makeMeasureSpec(
+            resources.displayMetrics.widthPixels,
+            View.MeasureSpec.AT_MOST
+        )
+        tempTv.measure(widthSpec, View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+        return tempTv.measuredHeight
+    }
+    
+    private fun buildRepeatedMovieCreditsText(singleLineText: String, singleWidth: Float): String {
+        val screenWidth = resources.displayMetrics.widthPixels.toFloat()
+        // Need enough copies to fill 3 lines (3 * screenWidth) for continuous flow
+        val copies = if (singleWidth > 0) {
+            ((3 * screenWidth) / singleWidth).toInt() + 3
+        } else 5
+        return singleLineText.repeat(copies.coerceIn(3, 50))
+    }
+    
+    private fun measureSingleLineHeight(
+        fontSize: Float, lineHeight: Float,
+        isBold: Boolean, isItalic: Boolean, fontFamily: String
+    ): Int {
+        val typefaceStyle = when {
+            isBold && isItalic -> android.graphics.Typeface.BOLD_ITALIC
+            isBold -> android.graphics.Typeface.BOLD
+            isItalic -> android.graphics.Typeface.ITALIC
+            else -> android.graphics.Typeface.NORMAL
+        }
+        val typeface = try {
+            android.graphics.Typeface.create(fontFamily, typefaceStyle)
+        } catch (e: Exception) {
+            android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, typefaceStyle)
+        }
+        val tempTv = TextView(this).apply {
+            text = "Ag"
+            textSize = fontSize
+            this.typeface = typeface
+            setLineSpacing(0f, lineHeight)
+            setSingleLine(true)
+            maxLines = 1
+        }
+        val widthSpec = View.MeasureSpec.makeMeasureSpec(
+            resources.displayMetrics.widthPixels,
+            View.MeasureSpec.AT_MOST
+        )
+        tempTv.measure(widthSpec, View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+        return tempTv.measuredHeight
+    }
+    
+    private fun createMovieCreditsView(
+        text: String, fontSize: Float, textColor: Int, bgColor: Int = Color.TRANSPARENT,
+        mirror: Boolean = false, fontFamily: String = "Roboto",
+        isBold: Boolean = false, isItalic: Boolean = false,
+        lineHeight: Float = 1.5f, textAlign: Int = 1,
+        opacity: Float = 0f, paddingH: Float = 20f
+    ): View {
+        val density = resources.displayMetrics.density
+        val paddingPx = (paddingH * density).toInt()
+        
+        val bgR = Color.red(bgColor)
+        val bgG = Color.green(bgColor)
+        val bgB = Color.blue(bgColor)
+        val bgAlpha = (opacity * 255).toInt().coerceIn(0, 255)
+        val finalBgColor = Color.argb(bgAlpha, bgR, bgG, bgB)
+        
+        val typefaceStyle = when {
+            isBold && isItalic -> android.graphics.Typeface.BOLD_ITALIC
+            isBold -> android.graphics.Typeface.BOLD
+            isItalic -> android.graphics.Typeface.ITALIC
+            else -> android.graphics.Typeface.NORMAL
+        }
+        val typeface = try {
+            android.graphics.Typeface.create(fontFamily, typefaceStyle)
+        } catch (e: Exception) {
+            android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, typefaceStyle)
+        }
+        
+        val shadowColor = if (textColor == Color.WHITE || textColor == Color.YELLOW) Color.BLACK else Color.WHITE
+        
+        // Prepare single-line text
+        movieCreditsSingleText = text.replace("\n", "     ") + "     "
+        
+        // Pre-measure text width using Paint (avoids layout dependency)
+        val scaledDensity = resources.displayMetrics.scaledDensity
+        val measurePaint = android.graphics.Paint().apply {
+            textSize = fontSize * scaledDensity
+            this.typeface = typeface
+        }
+        val singleTextWidth = measurePaint.measureText(movieCreditsSingleText)
+        val screenWidth = resources.displayMetrics.widthPixels.toFloat()
+        
+        // Set dimensions immediately (no need to wait for layout)
+        movieCreditsSingleWidth = singleTextWidth
+        movieCreditsLaneWidth = (screenWidth - paddingPx * 2).toInt()
+        
+        val repeatedText = buildRepeatedMovieCreditsText(movieCreditsSingleText, singleTextWidth)
+        val repeatedTextWidth = (measurePaint.measureText(repeatedText) + 1).toInt()
+        
+        // Measure single line height
+        val singleLineH = measureSingleLineHeight(fontSize, lineHeight, isBold, isItalic, fontFamily)
+        
+        // Container with 3 lanes (clipped)
+        val container = android.widget.FrameLayout(this).apply {
+            setBackgroundColor(finalBgColor)
+            clipChildren = true
+            clipToPadding = true
+            if (mirror) scaleX = -1f
+        }
+        
+        movieCreditsTextViews.clear()
+        
+        // Create 3 lanes: i=0 is top (line 1), i=2 is bottom (line 3)
+        for (i in 0 until 3) {
+            val lane = android.widget.FrameLayout(this).apply {
+                clipChildren = true
+                clipToPadding = true
+                setPadding(paddingPx, 0, paddingPx, 0)
+            }
+            val laneParams = android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                singleLineH
+            )
+            laneParams.topMargin = i * singleLineH
+            lane.layoutParams = laneParams
+            
+            // Single-line wide TextView inside each lane
+            val tv = TextView(this).apply {
+                this.text = repeatedText
+                this.textSize = fontSize
+                this.setTextColor(textColor)
+                this.typeface = typeface
+                this.setSingleLine(true)
+                this.maxLines = 1
+                this.setLineSpacing(0f, lineHeight)
+                this.setShadowLayer(4f, 2f, 2f, shadowColor)
+            }
+            
+            // Set explicit width so text is not truncated by parent
+            val tvParams = android.widget.FrameLayout.LayoutParams(
+                repeatedTextWidth,
+                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
+            )
+            lane.addView(tv, tvParams)
+            movieCreditsTextViews.add(tv)
+            container.addView(lane)
+        }
+        
+        return container
     }
     
     override fun onDestroy() {

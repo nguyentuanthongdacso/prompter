@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'dart:async';
+import 'dart:ui' as ui;
 
 class OverlayPrompter extends StatefulWidget {
   const OverlayPrompter({super.key});
@@ -31,6 +32,11 @@ class _OverlayPrompterState extends State<OverlayPrompter> {
   double _lineHeight = 1.5;
   TextAlign _textAlign = TextAlign.center;
   double _paddingHorizontal = 24.0;
+
+  // Movie Credits mode state
+  int _scrollMode = 0; // 0=vertical, 1=movieCredits
+  double _movieCreditsOffset = 0.0;
+  double _mcCycleHeight = 0.0;
 
   @override
   void initState() {
@@ -87,6 +93,7 @@ class _OverlayPrompterState extends State<OverlayPrompter> {
       
       final alignIndex = data['textAlign'] ?? 1;
       _textAlign = TextAlign.values[alignIndex];
+      _scrollMode = data['scrollMode'] ?? _scrollMode;
     });
   }
 
@@ -101,20 +108,35 @@ class _OverlayPrompterState extends State<OverlayPrompter> {
     _scrollTimer?.cancel();
     setState(() => _isPlaying = true);
     
-    _scrollTimer = Timer.periodic(const Duration(milliseconds: 16), (timer) {
-      if (_scrollController.hasClients && _isPlaying) {
-        final maxScroll = _scrollController.position.maxScrollExtent;
-        final currentScroll = _scrollController.offset;
-        
-        if (currentScroll >= maxScroll) {
-          _pauseScrolling();
-          return;
+    if (_scrollMode == 1) {
+      // Movie Credits mode
+      _scrollTimer = Timer.periodic(const Duration(milliseconds: 16), (timer) {
+        if (_isPlaying) {
+          setState(() {
+            _movieCreditsOffset += _scrollSpeed / 60.0;
+            if (_mcCycleHeight > 0 && _movieCreditsOffset >= _mcCycleHeight) {
+              _movieCreditsOffset -= _mcCycleHeight;
+            }
+          });
         }
-        
-        final pixelsPerFrame = _scrollSpeed / 60.0;
-        _scrollController.jumpTo(currentScroll + pixelsPerFrame);
-      }
-    });
+      });
+    } else {
+      // Regular vertical scroll
+      _scrollTimer = Timer.periodic(const Duration(milliseconds: 16), (timer) {
+        if (_scrollController.hasClients && _isPlaying) {
+          final maxScroll = _scrollController.position.maxScrollExtent;
+          final currentScroll = _scrollController.offset;
+          
+          if (currentScroll >= maxScroll) {
+            _pauseScrolling();
+            return;
+          }
+          
+          final pixelsPerFrame = _scrollSpeed / 60.0;
+          _scrollController.jumpTo(currentScroll + pixelsPerFrame);
+        }
+      });
+    }
   }
 
   void _pauseScrolling() {
@@ -177,24 +199,27 @@ class _OverlayPrompterState extends State<OverlayPrompter> {
           ),
           child: Stack(
             children: [
-              // Scrolling text
-              Transform(
-                alignment: Alignment.center,
-                transform: Matrix4.identity()
-                  ..scale(_mirrorHorizontal ? -1.0 : 1.0, 1.0, 1.0),
-                child: SingleChildScrollView(
-                  controller: _scrollController,
-                  padding: EdgeInsets.symmetric(
-                    horizontal: _paddingHorizontal,
-                    vertical: 80, // Space for control panel
-                  ),
-                  child: Text(
-                    _text,
-                    style: textStyle,
-                    textAlign: _textAlign,
+              // Scrolling text (mode-dependent)
+              if (_scrollMode == 1)
+                _buildMovieCreditsView(textStyle)
+              else
+                Transform(
+                  alignment: Alignment.center,
+                  transform: Matrix4.identity()
+                    ..scale(_mirrorHorizontal ? -1.0 : 1.0, 1.0, 1.0),
+                  child: SingleChildScrollView(
+                    controller: _scrollController,
+                    padding: EdgeInsets.symmetric(
+                      horizontal: _paddingHorizontal,
+                      vertical: 80,
+                    ),
+                    child: Text(
+                      _text,
+                      style: textStyle,
+                      textAlign: _textAlign,
+                    ),
                   ),
                 ),
-              ),
 
               // Floating Control Panel - bottom right
               Positioned(
@@ -248,6 +273,84 @@ class _OverlayPrompterState extends State<OverlayPrompter> {
                 ),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMovieCreditsView(TextStyle textStyle) {
+    // Convert multi-line text to single continuous line for horizontal scrolling
+    final singleLineText = '${_text.replaceAll('\n', '     ')}     ';
+
+    return Transform(
+      alignment: Alignment.center,
+      transform: Matrix4.identity()
+        ..scale(_mirrorHorizontal ? -1.0 : 1.0, 1.0, 1.0),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final lineWidth = constraints.maxWidth - _paddingHorizontal * 2;
+
+          // Measure single line height
+          final linePainter = TextPainter(
+            text: TextSpan(text: 'Ág', style: textStyle),
+            textDirection: ui.TextDirection.ltr,
+          )..layout();
+          final lineHeight = linePainter.height;
+
+          // Measure text width as single horizontal line
+          final textPainter = TextPainter(
+            text: TextSpan(text: singleLineText, style: textStyle),
+            maxLines: 1,
+            textDirection: ui.TextDirection.ltr,
+          )..layout();
+          final textWidth = textPainter.width;
+
+          _mcCycleHeight = textWidth; // cycle = one full text width
+          if (textWidth <= 0) return const SizedBox();
+
+          final effectiveOffset = _movieCreditsOffset % textWidth;
+          final copies = (3 * lineWidth / textWidth).ceil() + 2;
+          final repeatedText = List.generate(copies, (_) => singleLineText).join();
+
+          return Center(
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: _paddingHorizontal),
+              child: SizedBox(
+                height: lineHeight * 3,
+                child: Column(
+                  children: [
+                    // Line 1 (top) — oldest text, exits here
+                    _buildCreditsLine(repeatedText, textStyle, lineWidth,
+                        effectiveOffset, lineHeight),
+                    // Line 2 (middle)
+                    _buildCreditsLine(repeatedText, textStyle, lineWidth,
+                        effectiveOffset + lineWidth, lineHeight),
+                    // Line 3 (bottom) — newest text, enters here
+                    _buildCreditsLine(repeatedText, textStyle, lineWidth,
+                        effectiveOffset + 2 * lineWidth, lineHeight),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildCreditsLine(String repeatedText, TextStyle style, double lineWidth,
+      double offset, double lineHeight) {
+    return SizedBox(
+      height: lineHeight,
+      width: lineWidth,
+      child: ClipRect(
+        child: OverflowBox(
+          maxWidth: double.infinity,
+          alignment: Alignment.centerLeft,
+          child: Transform.translate(
+            offset: Offset(-offset, 0),
+            child: Text(repeatedText, style: style, maxLines: 1, softWrap: false),
           ),
         ),
       ),

@@ -49,7 +49,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ChangeNotifierProvider(
-      create: (context) => PrompterSettings(),
+      create: (context) => PrompterSettings()..loadSettings(),
       child: MaterialApp(
         title: 'Prompter',
         debugShowCheckedModeBanner: false,
