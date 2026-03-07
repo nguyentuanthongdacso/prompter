@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Prompter Remote Control</title>
+<style>
+:root {
+  --bg: #1a1a2e;
+  --surface: #16213e;
+  --surface2: #0f3460;
+  --primary: #e94560;
+  --primary-hover: #ff6b81;
+  --text: #eee;
+  --text-muted: #a0a0b0;
+  --border: #2a2a4a;
+  --success: #2ecc71;
+  --danger: #e74c3c;
+  --radius: 10px;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f0f0f5;
+    --surface: #fff;
+    --surface2: #e8eaf6;
+    --primary: #5c6bc0;
+    --primary-hover: #7986cb;
+    --text: #222;
+    --text-muted: #666;
+    --border: #ddd;
+  }
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  padding-bottom: 60px;
+}
+
+.header {
+  background: var(--surface);
+  padding: 14px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.header h1 {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.status-dot {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--danger);
+  transition: background 0.3s;
+}
+
+.status-dot.connected { background: var(--success); }
+
+.container { max-width: 700px; margin: 0 auto; padding: 16px; }
+
+.section {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 14px;
+  border: 1px solid var(--border);
+}
+
+.section-title {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+  letter-spacing: 0.5px;
+}
+
+/* Controls */
+.controls-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.btn {
+  border: none;
+  outline: none;
+  cursor: pointer;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 12px 24px;
+  transition: all 0.15s;
+  color: #fff;
+}
+
+.btn:active { transform: scale(0.96); }
+
+.btn-play {
+  background: var(--success);
+  font-size: 18px;
+  min-height: 48px;
+  min-width: 48px;
+  padding: 12px 24px;
+}
+
+.btn-secondary {
+  min-height: 48px;
+  min-width: 48px;
+}
+
+.btn-play.playing { background: var(--primary); }
+
+.btn-secondary {
+  background: var(--surface2);
+  color: var(--text);
+  padding: 12px 16px;
+}
+
+.btn-secondary:hover { opacity: 0.8; }
+
+/* Sliders */
+.slider-group { margin-bottom: 14px; }
+.slider-group:last-child { margin-bottom: 0; }
+
+.slider-label {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-size: 14px;
+}
+
+.slider-value {
+  font-weight: 600;
+  color: var(--primary);
+  min-width: 60px;
+  text-align: right;
+}
+
+input[type="range"] {
+  -webkit-appearance: none;
+  width: 100%;
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  outline: none;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 22px; height: 22px;
+  background: var(--primary);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+/* TextArea */
+.text-area {
+  width: 100%;
+  min-height: 140px;
+  resize: vertical;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 15px;
+  font-family: inherit;
+  line-height: 1.5;
+}
+
+.text-area:focus {
+  outline: 2px solid var(--primary);
+  border-color: transparent;
+}
+
+.text-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.btn-text {
+  background: var(--primary);
+  flex: 1;
+  padding: 10px;
+}
+
+.btn-text:hover { background: var(--primary-hover); }
+
+/* Format controls */
+.format-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.format-btn {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 14px;
+  transition: all 0.15s;
+}
+
+.format-btn.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+.format-btn:hover { opacity: 0.8; }
+
+select {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 14px;
+  width: 100%;
+  cursor: pointer;
+}
+
+/* Color picker */
+.color-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.color-swatch {
+  width: 32px; height: 32px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: border-color 0.15s;
+}
+
+.color-swatch.active { border-color: var(--primary); }
+.color-swatch:hover { border-color: var(--text-muted); }
+
+/* Collapsible */
+.collapsible-header {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+}
+
+.collapsible-header .arrow {
+  transition: transform 0.2s;
+  font-size: 12px;
+}
+
+.collapsible-header.open .arrow { transform: rotate(90deg); }
+
+.collapsible-body {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease;
+}
+
+.collapsible-body.open { max-height: 1200px; }
+
+/* Footer */
+.footer {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding: 10px 20px;
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+  font-size: 12px;
+  color: var(--text-muted);
+  z-index: 10;
+}
+
+/* Reconnecting overlay */
+.reconnect-overlay {
+  display: none;
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.7);
+  z-index: 100;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
+  gap: 16px;
+  color: #fff;
+  font-size: 18px;
+}
+
+.reconnect-overlay.show { display: flex; }
+
+.spinner {
+  width: 40px; height: 40px;
+  border: 3px solid rgba(255,255,255,0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Mode buttons */
+.mode-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.btn-mode {
+  flex: 1;
+  border: none;
+  outline: none;
+  cursor: pointer;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 12px 16px;
+  transition: all 0.15s;
+  color: var(--text);
+  background: var(--surface2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.btn-mode:active { transform: scale(0.96); }
+.btn-mode:hover { opacity: 0.85; }
+.btn-mode.active {
+  background: var(--primary);
+  color: #fff;
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>🎤 Prompter Remote</h1>
+  <div class="status">
+    <div class="status-dot" id="statusDot"></div>
+    <span id="statusText">Đang kết nối...</span>
+  </div>
+</div>
+
+<div class="container">
+  <!-- Main Controls -->
+  <div class="section">
+    <div class="section-title">Chế độ hiển thị</div>
+    <div class="mode-row">
+      <button class="btn-mode active" id="btnModeFullscreen" onclick="selectMode('fullscreen')">📺 Toàn màn hình</button>
+      <button class="btn-mode" id="btnModeOverlay" onclick="selectMode('overlay')">🪟 Overlay</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:14px">
+      <button class="btn btn-text" style="flex:1" onclick="launchMode()">🚀 Mở trình chiếu</button>
+    </div>
+    <div class="section-title">Điều khiển</div>
+    <div class="controls-row">
+      <button class="btn btn-secondary" onclick="sendReset()" title="Tua về đầu">⏮</button>
+      <button class="btn btn-play" id="btnPlay" onclick="togglePlay()">▶ Play</button>
+      <button class="btn btn-secondary" onclick="sendForward()" title="Tua tới">⏭</button>
+    </div>
+    <div style="height:14px"></div>
+    <div class="slider-group">
+      <div class="slider-label">
+        <span>Tốc độ cuộn</span>
+        <span class="slider-value" id="speedVal">50 px/s</span>
+      </div>
+      <input type="range" id="speedSlider" min="10" max="200" step="1" value="50" oninput="onSpeedChange(this.value)">
+    </div>
+    <div class="slider-group">
+      <div class="slider-label">
+        <span>Cỡ chữ</span>
+        <span class="slider-value" id="fontSizeVal">32 px</span>
+      </div>
+      <input type="range" id="fontSizeSlider" min="12" max="120" step="1" value="32" oninput="onFontSizeChange(this.value)">
+    </div>
+  </div>
+
+  <!-- Text -->
+  <div class="section">
+    <div class="section-title">Văn bản</div>
+    <textarea class="text-area" id="textInput" placeholder="Nhập văn bản cần hiển thị..."></textarea>
+    <div class="text-actions">
+      <button class="btn btn-text" onclick="applyText()">Áp dụng văn bản</button>
+    </div>
+  </div>
+
+  <!-- Advanced Format - Collapsible -->
+  <div class="section">
+    <div class="collapsible-header" id="advancedToggle" onclick="toggleAdvanced()">
+      <span class="arrow">▶</span>
+      <span class="section-title" style="margin-bottom:0">Định dạng nâng cao</span>
+    </div>
+    <div class="collapsible-body" id="advancedBody">
+      <div style="padding-top:14px">
+        <!-- Font Family -->
+        <div class="slider-group">
+          <div class="slider-label"><span>Font chữ</span></div>
+          <select id="fontSelect" onchange="onFontChange(this.value)">
+            <option value="Arial">Arial</option>
+            <option value="Times New Roman">Times New Roman</option>
+            <option value="Roboto" selected>Roboto</option>
+            <option value="Open Sans">Open Sans</option>
+            <option value="Lato">Lato</option>
+            <option value="Montserrat">Montserrat</option>
+            <option value="Oswald">Oswald</option>
+            <option value="Raleway">Raleway</option>
+            <option value="Poppins">Poppins</option>
+            <option value="Playfair Display">Playfair Display</option>
+            <option value="Merriweather">Merriweather</option>
+            <option value="Ubuntu">Ubuntu</option>
+            <option value="Nunito">Nunito</option>
+            <option value="Noto Sans">Noto Sans</option>
+          </select>
+        </div>
+
+        <!-- Bold / Italic -->
+        <div class="slider-group">
+          <div class="slider-label"><span>Kiểu chữ</span></div>
+          <div class="format-row">
+            <button class="format-btn" id="btnBold" onclick="toggleBold()"><b>B</b></button>
+            <button class="format-btn" id="btnItalic" onclick="toggleItalic()"><i>I</i></button>
+          </div>
+        </div>
+
+        <!-- Text Color -->
+        <div class="slider-group">
+          <div class="slider-label"><span>Màu chữ</span></div>
+          <div class="color-row" id="textColorRow"></div>
+        </div>
+
+        <!-- Background Color -->
+        <div class="slider-group">
+          <div class="slider-label"><span>Màu nền</span></div>
+          <div class="color-row" id="bgColorRow"></div>
+        </div>
+
+        <!-- Line Height -->
+        <div class="slider-group">
+          <div class="slider-label">
+            <span>Giãn dòng</span>
+            <span class="slider-value" id="lineHeightVal">1.5</span>
+          </div>
+          <input type="range" id="lineHeightSlider" min="1" max="3" step="0.1" value="1.5" oninput="onLineHeightChange(this.value)">
+        </div>
+
+        <!-- Opacity -->
+        <div class="slider-group">
+          <div class="slider-label">
+            <span>Độ trong suốt nền</span>
+            <span class="slider-value" id="opacityVal">0%</span>
+          </div>
+          <input type="range" id="opacitySlider" min="0" max="1" step="0.05" value="0" oninput="onOpacityChange(this.value)">
+        </div>
+
+        <!-- Mirror -->
+        <div class="slider-group">
+          <div class="format-row">
+            <button class="format-btn" id="btnMirror" onclick="toggleMirror()">🪞 Lật gương</button>
+          </div>
+        </div>
+
+        <!-- Scroll Mode -->
+        <div class="slider-group">
+          <div class="slider-label"><span>Kiểu cuộn</span></div>
+          <div class="format-row">
+            <button class="format-btn" id="btnModeVertical" onclick="setScrollMode('vertical')">Dọc</button>
+            <button class="format-btn" id="btnModeCredits" onclick="setScrollMode('movieCredits')">Movie Credits</button>
+          </div>
+        </div>
+
+        <!-- Padding Horizontal -->
+        <div class="slider-group">
+          <div class="slider-label">
+            <span>Lề ngang</span>
+            <span class="slider-value" id="paddingHVal">20 px</span>
+          </div>
+          <input type="range" id="paddingHSlider" min="0" max="100" step="1" value="20" oninput="onPaddingHChange(this.value)">
+        </div>
+
+        <!-- Overlay Position -->
+        <div class="slider-group">
+          <div class="slider-label"><span>Vị trí overlay</span></div>
+          <div class="format-row">
+            <button class="format-btn" data-opos="top" onclick="setOverlayPosition('top')">Trên</button>
+            <button class="format-btn" data-opos="center" onclick="setOverlayPosition('center')">Giữa</button>
+            <button class="format-btn" data-opos="bottom" onclick="setOverlayPosition('bottom')">Dưới</button>
+          </div>
+        </div>
+
+        <!-- Overlay Height -->
+        <div class="slider-group">
+          <div class="slider-label">
+            <span>Chiều cao overlay</span>
+            <span class="slider-value" id="overlayHeightVal">150 px</span>
+          </div>
+          <input type="range" id="overlayHeightSlider" min="80" max="700" step="5" value="150" oninput="onOverlayHeightChange(this.value)">
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="footer">
+  <span id="clientCount">0 thiết bị kết nối</span>
+</div>
+
+<div class="reconnect-overlay" id="reconnectOverlay">
+  <div class="spinner"></div>
+  <span>Đang kết nối lại...</span>
+</div>
+
+<script>
+const COLORS = [
+  {name:'Trắng',hex:'#ffffffff'},
+  {name:'Đen',hex:'#ff000000'},
+  {name:'Đỏ',hex:'#fff44336'},
+  {name:'Xanh lá',hex:'#ff4caf50'},
+  {name:'Xanh dương',hex:'#ff2196f3'},
+  {name:'Vàng',hex:'#ffffeb3b'},
+  {name:'Cam',hex:'#ffff9800'},
+  {name:'Tím',hex:'#ff9c27b0'},
+  {name:'Hồng',hex:'#ffe91e63'},
+  {name:'Xám',hex:'#ff9e9e9e'}
+];
+
+let ws = null;
+let state = {};
+let reconnectTimer = null;
+let reconnectDelay = 1000;
+let selectedMode = 'fullscreen'; // 'fullscreen' or 'overlay'
+
+// --- WebSocket ---
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(proto + '//' + location.host + '/ws');
+
+  ws.onopen = function() {
+    document.getElementById('statusDot').classList.add('connected');
+    document.getElementById('statusText').textContent = 'Đã kết nối';
+    document.getElementById('reconnectOverlay').classList.remove('show');
+    reconnectDelay = 1000;
+  };
+
+  ws.onclose = function() {
+    document.getElementById('statusDot').classList.remove('connected');
+    document.getElementById('statusText').textContent = 'Mất kết nối';
+    scheduleReconnect();
+  };
+
+  ws.onerror = function() {
+    ws.close();
+  };
+
+  ws.onmessage = function(event) {
+    var msg;
+    try { msg = JSON.parse(event.data); } catch(e) { return; }
+    if (msg.type === 'full_sync' || msg.type === 'state_update') {
+      state = Object.assign(state, msg.data);
+      updateUI();
+    }
+    if (msg.type === 'status') {
+      var count = msg.data.connectedClients || 0;
+      document.getElementById('clientCount').textContent = count + ' thiết bị kết nối';
+    }
+  };
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer) return;
+  document.getElementById('reconnectOverlay').classList.add('show');
+  reconnectTimer = setTimeout(function() {
+    reconnectTimer = null;
+    reconnectDelay = Math.min(reconnectDelay * 1.5, 10000);
+    connect();
+  }, reconnectDelay);
+}
+
+function send(msg) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(msg));
+  }
+}
+
+// --- UI Updates ---
+function updateUI() {
+  // Play/Pause
+  var btn = document.getElementById('btnPlay');
+  if (state.isPlaying) {
+    btn.textContent = '⏸ Pause';
+    btn.classList.add('playing');
+  } else {
+    btn.textContent = '▶ Play';
+    btn.classList.remove('playing');
+  }
+
+  // Speed
+  var speed = state.scrollSpeed || 50;
+  document.getElementById('speedSlider').value = speed;
+  document.getElementById('speedVal').textContent = Math.round(speed) + ' px/s';
+
+  // Font size
+  var fs = state.fontSize || 32;
+  document.getElementById('fontSizeSlider').value = fs;
+  document.getElementById('fontSizeVal').textContent = Math.round(fs) + ' px';
+
+  // Text
+  var ta = document.getElementById('textInput');
+  if (document.activeElement !== ta) {
+    ta.value = state.text || '';
+  }
+
+  // Font family
+  document.getElementById('fontSelect').value = state.fontFamily || 'Roboto';
+
+  // Bold / Italic
+  document.getElementById('btnBold').classList.toggle('active', !!state.isBold);
+  document.getElementById('btnItalic').classList.toggle('active', !!state.isItalic);
+
+  // Line height
+  var lh = state.lineHeight || 1.5;
+  document.getElementById('lineHeightSlider').value = lh;
+  document.getElementById('lineHeightVal').textContent = parseFloat(lh).toFixed(1);
+
+  // Opacity
+  var op = state.opacity != null ? state.opacity : 0;
+  document.getElementById('opacitySlider').value = op;
+  document.getElementById('opacityVal').textContent = Math.round(op * 100) + '%';
+
+  // Mirror
+  document.getElementById('btnMirror').classList.toggle('active', !!state.mirrorHorizontal);
+
+  // Scroll mode
+  document.getElementById('btnModeVertical').classList.toggle('active', state.scrollMode === 'vertical');
+  document.getElementById('btnModeCredits').classList.toggle('active', state.scrollMode === 'movieCredits');
+
+  // Padding horizontal
+  var ph = state.paddingHorizontal != null ? state.paddingHorizontal : 20;
+  document.getElementById('paddingHSlider').value = ph;
+  document.getElementById('paddingHVal').textContent = Math.round(ph) + ' px';
+
+  // Overlay position
+  document.querySelectorAll('[data-opos]').forEach(function(btn) {
+    btn.classList.toggle('active', btn.getAttribute('data-opos') === state.overlayPosition);
+  });
+
+  // Overlay height
+  var oh = state.overlayHeight || 150;
+  document.getElementById('overlayHeightSlider').value = oh;
+  document.getElementById('overlayHeightVal').textContent = Math.round(oh) + ' px';
+
+  // Color highlights
+  updateColorSwatches('textColorRow', state.textColor);
+  updateColorSwatches('bgColorRow', state.backgroundColor);
+}
+
+function updateColorSwatches(rowId, activeHex) {
+  var row = document.getElementById(rowId);
+  var swatches = row.querySelectorAll('.color-swatch');
+  swatches.forEach(function(s) {
+    s.classList.toggle('active', s.getAttribute('data-hex') === activeHex);
+  });
+}
+
+// --- Actions ---
+function selectMode(mode) {
+  selectedMode = mode;
+  document.getElementById('btnModeFullscreen').classList.toggle('active', mode === 'fullscreen');
+  document.getElementById('btnModeOverlay').classList.toggle('active', mode === 'overlay');
+}
+
+function launchMode() {
+  var action = selectedMode === 'overlay' ? 'start_overlay' : 'start_fullscreen';
+  send({type: 'command', action: action});
+}
+
+function togglePlay() {
+  send({type: 'command', action: 'toggle'});
+}
+
+function sendReset() {
+  send({type: 'command', action: 'reset'});
+}
+
+function sendForward() {
+  send({type: 'command', action: 'forward'});
+}
+
+var speedDebounce = null;
+function onSpeedChange(val) {
+  document.getElementById('speedVal').textContent = val + ' px/s';
+  clearTimeout(speedDebounce);
+  speedDebounce = setTimeout(function() {
+    send({type: 'update_settings', data: {scrollSpeed: parseFloat(val)}});
+  }, 50);
+}
+
+var fontSizeDebounce = null;
+function onFontSizeChange(val) {
+  document.getElementById('fontSizeVal').textContent = val + ' px';
+  clearTimeout(fontSizeDebounce);
+  fontSizeDebounce = setTimeout(function() {
+    send({type: 'update_settings', data: {fontSize: parseFloat(val)}});
+  }, 50);
+}
+
+function applyText() {
+  var text = document.getElementById('textInput').value;
+  send({type: 'update_text', data: {text: text}});
+}
+
+function onFontChange(val) {
+  send({type: 'update_settings', data: {fontFamily: val}});
+}
+
+function toggleBold() {
+  send({type: 'update_settings', data: {isBold: !state.isBold}});
+}
+
+function toggleItalic() {
+  send({type: 'update_settings', data: {isItalic: !state.isItalic}});
+}
+
+var lineHeightDebounce = null;
+function onLineHeightChange(val) {
+  document.getElementById('lineHeightVal').textContent = parseFloat(val).toFixed(1);
+  clearTimeout(lineHeightDebounce);
+  lineHeightDebounce = setTimeout(function() {
+    send({type: 'update_settings', data: {lineHeight: parseFloat(val)}});
+  }, 50);
+}
+
+var opacityDebounce = null;
+function onOpacityChange(val) {
+  document.getElementById('opacityVal').textContent = Math.round(val * 100) + '%';
+  clearTimeout(opacityDebounce);
+  opacityDebounce = setTimeout(function() {
+    send({type: 'update_settings', data: {opacity: parseFloat(val)}});
+  }, 50);
+}
+
+function toggleMirror() {
+  send({type: 'update_settings', data: {mirrorHorizontal: !state.mirrorHorizontal}});
+}
+
+function setScrollMode(mode) {
+  send({type: 'update_settings', data: {scrollMode: mode}});
+}
+
+var paddingHDebounce = null;
+function onPaddingHChange(val) {
+  document.getElementById('paddingHVal').textContent = val + ' px';
+  clearTimeout(paddingHDebounce);
+  paddingHDebounce = setTimeout(function() {
+    send({type: 'update_settings', data: {paddingHorizontal: parseFloat(val)}});
+  }, 50);
+}
+
+function setOverlayPosition(pos) {
+  send({type: 'update_settings', data: {overlayPosition: pos}});
+}
+
+var overlayHeightDebounce = null;
+function onOverlayHeightChange(val) {
+  document.getElementById('overlayHeightVal').textContent = val + ' px';
+  clearTimeout(overlayHeightDebounce);
+  overlayHeightDebounce = setTimeout(function() {
+    send({type: 'update_settings', data: {overlayHeight: parseFloat(val)}});
+  }, 50);
+}
+
+function setTextColor(hex) {
+  send({type: 'update_settings', data: {textColor: hex}});
+}
+
+function setBgColor(hex) {
+  send({type: 'update_settings', data: {backgroundColor: hex}});
+}
+
+function toggleAdvanced() {
+  var header = document.getElementById('advancedToggle');
+  var body = document.getElementById('advancedBody');
+  header.classList.toggle('open');
+  body.classList.toggle('open');
+}
+
+// --- Init color swatches ---
+function initColorSwatches() {
+  var textRow = document.getElementById('textColorRow');
+  var bgRow = document.getElementById('bgColorRow');
+
+  COLORS.forEach(function(c) {
+    var s = document.createElement('div');
+    s.className = 'color-swatch';
+    s.setAttribute('data-hex', c.hex);
+    s.title = c.name;
+    s.style.background = argbToCss(c.hex);
+    s.onclick = function() { setTextColor(c.hex); };
+    textRow.appendChild(s);
+
+    var s2 = document.createElement('div');
+    s2.className = 'color-swatch';
+    s2.setAttribute('data-hex', c.hex);
+    s2.title = c.name;
+    s2.style.background = argbToCss(c.hex);
+    s2.onclick = function() { setBgColor(c.hex); };
+    bgRow.appendChild(s2);
+  });
+}
+
+function argbToCss(hex) {
+  if (!hex || hex.length < 9) return hex;
+  var h = hex.replace('#','');
+  var a = parseInt(h.substring(0,2), 16) / 255;
+  var r = parseInt(h.substring(2,4), 16);
+  var g = parseInt(h.substring(4,6), 16);
+  var b = parseInt(h.substring(6,8), 16);
+  return 'rgba(' + r + ',' + g + ',' + b + ',' + a.toFixed(2) + ')';
+}
+
+// Start
+initColorSwatches();
+connect();
+</script>
+</body>
+</html>

@@ -155,4 +155,25 @@ class NativeOverlayService {
       return null;
     }
   }
+
+  /// Toggle play/pause on the overlay without rebuilding it
+  static Future<void> togglePlayPause() async {
+    try {
+      await _channel.invokeMethod('overlayPlayPause');
+    } catch (_) {}
+  }
+
+  /// Reset scroll to beginning on the overlay
+  static Future<void> resetScroll() async {
+    try {
+      await _channel.invokeMethod('overlayResetScroll');
+    } catch (_) {}
+  }
+
+  /// Scroll forward on the overlay
+  static Future<void> scrollForward() async {
+    try {
+      await _channel.invokeMethod('overlayScrollForward');
+    } catch (_) {}
+  }
 }

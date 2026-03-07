@@ -264,4 +264,121 @@ class PrompterSettings extends ChangeNotifier {
 
   static List<Color> get presetColors => 
     presetColorsWithNames.map((e) => e['color'] as Color).toList();
+
+  // Serialize all settings to JSON for WebSocket sync
+  Map<String, dynamic> toJson() {
+    return {
+      'text': _text,
+      'scrollSpeed': _scrollSpeed,
+      'fontFamily': _fontFamily,
+      'fontSize': _fontSize,
+      'isBold': _isBold,
+      'isItalic': _isItalic,
+      'textColor': '#${_textColor.toARGB32().toRadixString(16).padLeft(8, '0')}',
+      'backgroundColor': '#${_backgroundColor.toARGB32().toRadixString(16).padLeft(8, '0')}',
+      'isPlaying': _isPlaying,
+      'mirrorHorizontal': _mirrorHorizontal,
+      'lineHeight': _lineHeight,
+      'textAlign': _textAlign.name,
+      'opacity': _opacity,
+      'paddingHorizontal': _paddingHorizontal,
+      'scrollMode': _scrollMode.name,
+      'overlayPosition': _overlayPosition.name,
+      'overlayHeight': _overlayHeight,
+    };
+  }
+
+  // Apply partial or full settings from JSON (from WebSocket remote control)
+  void applyFromJson(Map<String, dynamic> json) {
+    // Apply all changes directly to fields, then notify once to avoid
+    // multiple overlay rebuilds per remote update.
+    bool changed = false;
+
+    if (json.containsKey('text') && json['text'] as String != _text) {
+      _text = json['text'] as String;
+      changed = true;
+    }
+    if (json.containsKey('scrollSpeed')) {
+      final v = (json['scrollSpeed'] as num).toDouble().clamp(10.0, 200.0);
+      if (v != _scrollSpeed) { _scrollSpeed = v; changed = true; }
+    }
+    if (json.containsKey('fontFamily') && json['fontFamily'] as String != _fontFamily) {
+      _fontFamily = json['fontFamily'] as String;
+      changed = true;
+    }
+    if (json.containsKey('fontSize')) {
+      final v = (json['fontSize'] as num).toDouble().clamp(12.0, 120.0);
+      if (v != _fontSize) { _fontSize = v; changed = true; }
+    }
+    if (json.containsKey('isBold') && (json['isBold'] as bool) != _isBold) {
+      _isBold = json['isBold'] as bool;
+      changed = true;
+    }
+    if (json.containsKey('isItalic') && (json['isItalic'] as bool) != _isItalic) {
+      _isItalic = json['isItalic'] as bool;
+      changed = true;
+    }
+    if (json.containsKey('textColor')) {
+      final c = _parseColor(json['textColor'] as String);
+      if (c != _textColor) { _textColor = c; changed = true; }
+    }
+    if (json.containsKey('backgroundColor')) {
+      final c = _parseColor(json['backgroundColor'] as String);
+      if (c != _backgroundColor) { _backgroundColor = c; changed = true; }
+    }
+    if (json.containsKey('mirrorHorizontal') && (json['mirrorHorizontal'] as bool) != _mirrorHorizontal) {
+      _mirrorHorizontal = json['mirrorHorizontal'] as bool;
+      changed = true;
+    }
+    if (json.containsKey('lineHeight')) {
+      final v = (json['lineHeight'] as num).toDouble().clamp(1.0, 3.0);
+      if (v != _lineHeight) { _lineHeight = v; changed = true; }
+    }
+    if (json.containsKey('textAlign')) {
+      final align = TextAlign.values.firstWhere(
+        (e) => e.name == json['textAlign'],
+        orElse: () => TextAlign.center,
+      );
+      if (align != _textAlign) { _textAlign = align; changed = true; }
+    }
+    if (json.containsKey('opacity')) {
+      final v = (json['opacity'] as num).toDouble().clamp(0.0, 1.0);
+      if (v != _opacity) { _opacity = v; changed = true; }
+    }
+    if (json.containsKey('paddingHorizontal')) {
+      final v = (json['paddingHorizontal'] as num).toDouble().clamp(0.0, 100.0);
+      if (v != _paddingHorizontal) { _paddingHorizontal = v; changed = true; }
+    }
+    if (json.containsKey('scrollMode')) {
+      final mode = ScrollMode.values.firstWhere(
+        (e) => e.name == json['scrollMode'],
+        orElse: () => ScrollMode.vertical,
+      );
+      if (mode != _scrollMode) { _scrollMode = mode; changed = true; }
+    }
+    if (json.containsKey('overlayPosition')) {
+      final pos = OverlayStripPosition.values.firstWhere(
+        (e) => e.name == json['overlayPosition'],
+        orElse: () => OverlayStripPosition.bottom,
+      );
+      if (pos != _overlayPosition) { _overlayPosition = pos; changed = true; }
+    }
+    if (json.containsKey('overlayHeight')) {
+      final v = (json['overlayHeight'] as num).toDouble().clamp(80.0, 700.0);
+      if (v != _overlayHeight) { _overlayHeight = v; changed = true; }
+    }
+
+    if (changed) {
+      notifyListeners();
+      _save();
+    }
+  }
+
+  static Color _parseColor(String hex) {
+    final cleaned = hex.replaceFirst('#', '');
+    final value = int.tryParse(cleaned, radix: 16);
+    if (value == null) return Colors.black;
+    if (cleaned.length == 6) return Color(0xFF000000 | value);
+    return Color(value);
+  }
 }

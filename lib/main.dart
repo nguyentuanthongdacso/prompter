@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
 import 'models/prompter_settings.dart';
+import 'services/remote_server_service.dart';
 import 'screens/home_screen.dart';
 import 'screens/overlay_prompter.dart';
 
@@ -48,8 +49,18 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (context) => PrompterSettings()..loadSettings(),
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(
+          create: (context) => PrompterSettings()..loadSettings(),
+        ),
+        ChangeNotifierProxyProvider<PrompterSettings, RemoteServerService>(
+          create: (context) => RemoteServerService(
+            Provider.of<PrompterSettings>(context, listen: false),
+          ),
+          update: (context, settings, previous) => previous!,
+        ),
+      ],
       child: MaterialApp(
         title: 'Prompter',
         debugShowCheckedModeBanner: false,

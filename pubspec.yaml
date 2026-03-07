@@ -29,6 +29,11 @@ dependencies:
   # Google Fonts
   google_fonts: ^6.2.1
 
+  # Remote control server
+  shelf: ^1.4.0
+  shelf_web_socket: ^2.0.0
+  web_socket_channel: ^3.0.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -57,6 +62,7 @@ flutter:
   assets:
     - assets/images/banner.png
     - assets/images/promter.png
+    - assets/web/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

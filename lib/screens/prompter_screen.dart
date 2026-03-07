@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:window_manager/window_manager.dart';
 import '../models/prompter_settings.dart';
+import '../services/remote_server_service.dart';
 
 class PrompterScreen extends StatefulWidget {
   const PrompterScreen({super.key});
@@ -27,6 +28,11 @@ class _PrompterScreenState extends State<PrompterScreen> with WindowListener {
   double _movieCreditsOffset = 0.0;
   double _mcCycleHeight = 0.0;
 
+  // Listener for remote control sync
+  late PrompterSettings _settings;
+  bool _suppressSettingsSync = false;
+  StreamSubscription<String>? _remoteCommandSub;
+
   bool get _isDesktop => !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
 
   @override
@@ -46,8 +52,12 @@ class _PrompterScreenState extends State<PrompterScreen> with WindowListener {
     }
     
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final settings = Provider.of<PrompterSettings>(context, listen: false);
-      _currentSpeed = settings.scrollSpeed;
+      _settings = Provider.of<PrompterSettings>(context, listen: false);
+      _currentSpeed = _settings.scrollSpeed;
+      _settings.addListener(_onRemoteSettingsChanged);
+      // Listen for remote seek commands
+      final remoteService = Provider.of<RemoteServerService>(context, listen: false);
+      _remoteCommandSub = remoteService.commandStream.listen(_onRemoteCommand);
       _startScrolling();
     });
     
@@ -59,6 +69,42 @@ class _PrompterScreenState extends State<PrompterScreen> with WindowListener {
         });
       }
     });
+  }
+
+  /// React to settings changes triggered from remote control
+  void _onRemoteSettingsChanged() {
+    if (!mounted || _suppressSettingsSync) return;
+    // Sync play/pause state
+    if (_settings.isPlaying && !_isPlaying) {
+      _startScrolling();
+    } else if (!_settings.isPlaying && _isPlaying) {
+      _pauseScrolling();
+    }
+    // Sync speed
+    if (_settings.scrollSpeed != _currentSpeed) {
+      setState(() {
+        _currentSpeed = _settings.scrollSpeed;
+      });
+    }
+  }
+
+  /// Handle seek commands from remote control
+  void _onRemoteCommand(String command) {
+    if (!mounted) return;
+    switch (command) {
+      case 'reset':
+        _resetScroll();
+        break;
+      case 'forward':
+        if (_scrollController.hasClients) {
+          _scrollController.animateTo(
+            _scrollController.offset + 200,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          );
+        }
+        break;
+    }
   }
 
   Future<void> _setupDesktopWindow() async {
@@ -77,6 +123,8 @@ class _PrompterScreenState extends State<PrompterScreen> with WindowListener {
   void dispose() {
     _scrollTimer?.cancel();
     _scrollController.dispose();
+    _settings.removeListener(_onRemoteSettingsChanged);
+    _remoteCommandSub?.cancel();
     // Restore system UI on mobile
     if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
@@ -96,6 +144,10 @@ class _PrompterScreenState extends State<PrompterScreen> with WindowListener {
       setState(() {
         _isPlaying = true;
       });
+      // Sync to settings for remote clients
+      _suppressSettingsSync = true;
+      _settings.setPlaying(true);
+      _suppressSettingsSync = false;
     }
     
     final settings = Provider.of<PrompterSettings>(context, listen: false);
@@ -136,6 +188,10 @@ class _PrompterScreenState extends State<PrompterScreen> with WindowListener {
     setState(() {
       _isPlaying = false;
     });
+    // Sync to settings for remote clients
+    _suppressSettingsSync = true;
+    _settings.setPlaying(false);
+    _suppressSettingsSync = false;
   }
 
   void _togglePlayPause() {

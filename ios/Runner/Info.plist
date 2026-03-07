@@ -45,5 +45,7 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Ứng dụng cần truy cập mạng nội bộ để cho phép điều khiển từ xa</string>
 </dict>
 </plist>

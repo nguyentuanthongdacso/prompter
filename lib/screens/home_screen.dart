@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -9,6 +10,7 @@ import '../models/prompter_settings.dart';
 import '../widgets/text_preview.dart';
 import '../widgets/color_picker_dialog.dart';
 import '../services/native_overlay_service.dart';
+import '../services/remote_server_service.dart';
 import 'prompter_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -23,6 +25,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   late TextEditingController _textController;
   bool _hasOverlayPermission = false;
   bool _isOverlayActive = false;
+  StreamSubscription<String>? _remoteCommandSub;
+  Timer? _overlayPollTimer;
 
   bool get _isAndroid => !kIsWeb && Platform.isAndroid;
 
@@ -39,6 +43,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       _checkOverlayPermission();
       // Listen for settings changes to push live updates to overlay
       settings.addListener(_onSettingsChanged);
+      // Listen for remote commands (start_fullscreen, start_overlay)
+      final remoteService = Provider.of<RemoteServerService>(context, listen: false);
+      _remoteCommandSub = remoteService.commandStream.listen(_onRemoteCommand);
     });
   }
 
@@ -46,6 +53,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   void _onSettingsChanged() {
     if (!_isOverlayActive) return;
     final settings = Provider.of<PrompterSettings>(context, listen: false);
+
+    // Push all current settings to the native overlay.
+    // The Kotlin side now does in-place view updates (no rebuild)
+    // unless structural properties changed (e.g. scrollMode).
     NativeOverlayService.updateSettings(
       text: settings.text,
       fontSize: settings.fontSize,
@@ -66,6 +77,36 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
+  /// Handle commands received from remote control
+  void _onRemoteCommand(String command) {
+    if (!mounted) return;
+    switch (command) {
+      case 'start_fullscreen':
+        _startPrompter();
+        break;
+      case 'start_overlay':
+        _startOverlay();
+        break;
+      case 'play':
+      case 'pause':
+      case 'toggle':
+        if (_isOverlayActive) {
+          NativeOverlayService.togglePlayPause();
+        }
+        break;
+      case 'reset':
+        if (_isOverlayActive) {
+          NativeOverlayService.resetScroll();
+        }
+        break;
+      case 'forward':
+        if (_isOverlayActive) {
+          NativeOverlayService.scrollForward();
+        }
+        break;
+    }
+  }
+
   /// Sync overlay state back to app when resuming
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -75,6 +116,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     if (state == AppLifecycleState.detached && _isOverlayActive) {
       NativeOverlayService.hideOverlay();
       _isOverlayActive = false;
+      _stopOverlayPolling();
     }
   }
 
@@ -83,6 +125,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       final running = await NativeOverlayService.isOverlayRunning();
       if (!running) {
         setState(() => _isOverlayActive = false);
+        _stopOverlayPolling();
         return;
       }
       final overlayState = await NativeOverlayService.getOverlayState();
@@ -93,8 +136,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         
         final speed = overlayState['speed'] as int?;
         final color = overlayState['textColor'] as int?;
+        final playing = overlayState['isPlaying'] as bool?;
         if (speed != null) settings.setScrollSpeed(speed.toDouble());
         if (color != null) settings.setTextColor(Color(color));
+        if (playing != null && playing != settings.isPlaying) {
+          settings.setPlaying(playing);
+        }
         
         settings.addListener(_onSettingsChanged);
       }
@@ -111,6 +158,20 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     }
   }
 
+  void _startOverlayPolling() {
+    _overlayPollTimer?.cancel();
+    _overlayPollTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      if (_isOverlayActive && mounted) {
+        _syncOverlayStateToApp();
+      }
+    });
+  }
+
+  void _stopOverlayPolling() {
+    _overlayPollTimer?.cancel();
+    _overlayPollTimer = null;
+  }
+
   Future<void> _requestOverlayPermission() async {
     if (_isAndroid) {
       await NativeOverlayService.requestPermission();
@@ -125,6 +186,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     if (_isOverlayActive) {
       NativeOverlayService.hideOverlay();
     }
+    _remoteCommandSub?.cancel();
+    _overlayPollTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     final settings = Provider.of<PrompterSettings>(context, listen: false);
     settings.removeListener(_onSettingsChanged);
@@ -171,6 +234,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
     
     setState(() => _isOverlayActive = true);
+    // Native overlay auto-starts scrolling, sync isPlaying state
+    settings.setPlaying(true);
+    // Start polling native overlay state to sync play/pause back to web UI
+    _startOverlayPolling();
     
     // Minimize app to show overlay (move to background, don't kill)
     if (mounted) {
@@ -596,6 +663,11 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               ),
               const SizedBox(height: 20),
 
+              // Remote control section
+              const Divider(),
+              _buildRemoteControlSection(),
+              const SizedBox(height: 20),
+
               // Info
               Card(
                 child: Padding(
@@ -622,6 +694,183 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               ),
             ],
           ),
+        );
+      },
+    );
+  }
+
+  Widget _buildRemoteControlSection() {
+    return Consumer<RemoteServerService>(
+      builder: (context, server, child) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.wifi, color: Theme.of(context).colorScheme.primary),
+                const SizedBox(width: 8),
+                _buildSectionTitle('Điều khiển từ xa'),
+              ],
+            ),
+            const SizedBox(height: 8),
+            SwitchListTile(
+              title: const Text('Bật Server'),
+              subtitle: Text(
+                server.isRunning
+                    ? 'Đang chạy trên cổng ${server.port}'
+                    : 'Cho phép điều khiển từ thiết bị khác qua Wi-Fi',
+              ),
+              value: server.isRunning,
+              onChanged: (value) async {
+                if (value) {
+                  await server.startServer();
+                } else {
+                  await server.stopServer();
+                }
+              },
+            ),
+            if (server.isRunning) ...[
+              Card(
+                color: Theme.of(context).colorScheme.primaryContainer,
+                child: Padding(
+                  padding: const EdgeInsets.all(12.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Primary connection URL
+                      Row(
+                        children: [
+                          Icon(Icons.link, 
+                            size: 18, 
+                            color: Theme.of(context).colorScheme.onPrimaryContainer,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: SelectableText(
+                              server.connectionUrl,
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Theme.of(context).colorScheme.onPrimaryContainer,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.copy, size: 20),
+                            tooltip: 'Sao chép IP',
+                            onPressed: () {
+                              Clipboard.setData(ClipboardData(text: server.connectionUrl));
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Đã sao chép địa chỉ!'),
+                                  duration: Duration(seconds: 1),
+                                ),
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Mở trình duyệt trên thiết bị cùng Wi-Fi và nhập địa chỉ trên',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Theme.of(context).colorScheme.onPrimaryContainer.withValues(alpha: 0.7),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${server.clientCount} thiết bị đang kết nối',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: Theme.of(context).colorScheme.onPrimaryContainer,
+                        ),
+                      ),
+                      // Show all available IPs if more than 1
+                      if (server.allIps.length > 1) ...[
+                        const SizedBox(height: 10),
+                        const Divider(height: 1),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Nếu không kết nối được, thử các địa chỉ khác:',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontStyle: FontStyle.italic,
+                            color: Theme.of(context).colorScheme.onPrimaryContainer.withValues(alpha: 0.6),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        ...server.allIps.map((entry) {
+                          final url = 'http://${entry.value}:${server.port}';
+                          final isCurrent = entry.value == server.localIp;
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 4),
+                            child: InkWell(
+                              onTap: () {
+                                Clipboard.setData(ClipboardData(text: url));
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Đã sao chép $url'),
+                                    duration: const Duration(seconds: 1),
+                                  ),
+                                );
+                              },
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    isCurrent ? Icons.check_circle : Icons.circle_outlined,
+                                    size: 14,
+                                    color: isCurrent ? Colors.green : Theme.of(context).colorScheme.onPrimaryContainer.withValues(alpha: 0.5),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      '$url  (${entry.key})',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
+                                        color: Theme.of(context).colorScheme.onPrimaryContainer,
+                                      ),
+                                    ),
+                                  ),
+                                  Icon(Icons.copy, size: 14, color: Theme.of(context).colorScheme.onPrimaryContainer.withValues(alpha: 0.4)),
+                                ],
+                              ),
+                            ),
+                          );
+                        }),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              // Troubleshooting tips
+              const SizedBox(height: 8),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.help_outline, size: 16, color: Theme.of(context).colorScheme.primary),
+                          const SizedBox(width: 6),
+                          Text('Không kết nối được?', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.primary)),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      const Text('• Đảm bảo 2 thiết bị cùng mạng Wi-Fi', style: TextStyle(fontSize: 12)),
+                      const Text('• Nếu IP trên không đúng, thử các IP khác trong danh sách', style: TextStyle(fontSize: 12)),
+                      const Text('• Tắt VPN trên cả 2 thiết bị nếu có', style: TextStyle(fontSize: 12)),
+                      const Text('• Kiểm tra router không bật "AP Isolation"', style: TextStyle(fontSize: 12)),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ],
         );
       },
     );

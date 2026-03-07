@@ -151,13 +151,38 @@ class MainActivity : FlutterActivity() {
                 "getOverlayState" -> {
                     val state = mapOf(
                         "speed" to PrompterOverlayService.currentSpeed,
-                        "textColor" to PrompterOverlayService.currentColor
+                        "textColor" to PrompterOverlayService.currentColor,
+                        "isPlaying" to PrompterOverlayService.currentlyPlaying
                     )
                     result.success(state)
                 }
                 
                 "moveToBackground" -> {
                     moveTaskToBack(true)
+                    result.success(true)
+                }
+
+                "overlayPlayPause" -> {
+                    val intent = Intent(this, PrompterOverlayService::class.java).apply {
+                        action = PrompterOverlayService.ACTION_PLAY_PAUSE
+                    }
+                    startService(intent)
+                    result.success(true)
+                }
+
+                "overlayResetScroll" -> {
+                    val intent = Intent(this, PrompterOverlayService::class.java).apply {
+                        action = PrompterOverlayService.ACTION_SCROLL_UP
+                    }
+                    startService(intent)
+                    result.success(true)
+                }
+
+                "overlayScrollForward" -> {
+                    val intent = Intent(this, PrompterOverlayService::class.java).apply {
+                        action = PrompterOverlayService.ACTION_SCROLL_DOWN
+                    }
+                    startService(intent)
                     result.success(true)
                 }
                 
