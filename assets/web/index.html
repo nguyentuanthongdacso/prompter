@@ -1222,19 +1222,44 @@ function updatePreview() {
 
   var scale = getPreviewScale();
 
-  // Background
-  var bgCss = '#000';
-  if (state.backgroundColor) {
-    var h = (state.backgroundColor || '').replace('#','');
-    if (h.length >= 8) {
-      var r = parseInt(h.substring(2,4), 16);
-      var g = parseInt(h.substring(4,6), 16);
-      var b = parseInt(h.substring(6,8), 16);
-      var a = state.opacity != null ? state.opacity : 1;
-      bgCss = 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
+  // Background — auto-contrast: ensure text is always readable in live preview
+  // Compute text luminance to detect dark text
+  var textLum = 255; // default: assume white text
+  if (state.textColor) {
+    var th = state.textColor.replace('#','');
+    if (th.length >= 8) {
+      var tr = parseInt(th.substring(2,4), 16);
+      var tg = parseInt(th.substring(4,6), 16);
+      var tb = parseInt(th.substring(6,8), 16);
+      textLum = 0.299 * tr + 0.587 * tg + 0.114 * tb;
     }
   }
-  viewport.style.background = bgCss;
+  // Compute effective background
+  var bgAlpha = state.opacity != null ? state.opacity : 1;
+  var bgR = 0, bgG = 0, bgB = 0;
+  if (state.backgroundColor) {
+    var bh = (state.backgroundColor || '').replace('#','');
+    if (bh.length >= 8) {
+      bgR = parseInt(bh.substring(2,4), 16);
+      bgG = parseInt(bh.substring(4,6), 16);
+      bgB = parseInt(bh.substring(6,8), 16);
+    }
+  }
+  // Blend background over the container default (black=#000)
+  // effective = bg * alpha + container * (1 - alpha)
+  // If text would be invisible on this effective color, flip container to white
+  var effR = bgR * bgAlpha;
+  var effG = bgG * bgAlpha;
+  var effB = bgB * bgAlpha;
+  var effLum = 0.299 * effR + 0.587 * effG + 0.114 * effB;
+  // If both text and effective background are dark → text invisible
+  var needLightBg = (textLum < 128 && effLum < 80);
+  // Set container (behind transparent viewport) and then viewport itself
+  var previewCont = document.getElementById('previewContainer');
+  if (previewCont) {
+    previewCont.style.background = needLightBg ? '#f0f0f0' : '#000';
+  }
+  viewport.style.background = 'rgba(' + bgR + ',' + bgG + ',' + bgB + ',' + bgAlpha + ')';
 
   // Common text styles
   var fontCss = getFontCssFamily(state.fontFamily || 'Roboto');

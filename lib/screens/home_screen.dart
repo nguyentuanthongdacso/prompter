@@ -207,23 +207,27 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         final settings = Provider.of<PrompterSettings>(context, listen: false);
         final remoteService = Provider.of<RemoteServerService>(context, listen: false);
 
-        // Suppress state_update broadcasts during overlay sync to avoid DOM thrash on web
-        remoteService.suppressBroadcast = true;
+        // Suppress settings→overlay push (avoid echo loop) but allow broadcast to web
         settings.removeListener(_onSettingsChanged);
         
         final speed = overlayState['speed'] as int?;
         final color = overlayState['textColor'] as int?;
         final playing = overlayState['isPlaying'] as bool?;
-        if (speed != null) settings.setScrollSpeed(speed.toDouble());
-        if (color != null) settings.setTextColor(Color(color));
+
+        // Track whether any setting actually changed
+        if (speed != null && speed.toDouble() != settings.scrollSpeed) {
+          settings.setScrollSpeed(speed.toDouble());
+        }
+        if (color != null && Color(color) != settings.textColor) {
+          settings.setTextColor(Color(color));
+        }
         if (playing != null && playing != settings.isPlaying) {
           settings.setPlaying(playing);
         }
         
         settings.addListener(_onSettingsChanged);
-        remoteService.suppressBroadcast = false;
 
-        // Broadcast only scroll progress (lightweight, no DOM rebuild)
+        // Broadcast scroll progress
         final rawProgress = overlayState['scrollProgress'];
         final scrollProgress = (rawProgress is num) ? rawProgress.toDouble() : 0.0;
         remoteService.broadcastScrollProgress(scrollProgress, mode: 'overlay');
