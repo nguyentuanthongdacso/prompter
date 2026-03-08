@@ -194,6 +194,12 @@ class _PrompterScreenState extends State<PrompterScreen> with WindowListener {
         }
       });
     } else {
+      // If already at end, reset to beginning before starting
+      if (_scrollController.hasClients &&
+          _scrollController.position.maxScrollExtent > 0 &&
+          _scrollController.offset >= _scrollController.position.maxScrollExtent) {
+        _scrollController.jumpTo(0);
+      }
       // Regular vertical scroll
       _scrollTimer = Timer.periodic(const Duration(milliseconds: 16), (timer) {
         if (_scrollController.hasClients && _isPlaying) {

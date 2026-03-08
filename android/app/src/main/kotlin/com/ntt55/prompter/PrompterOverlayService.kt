@@ -49,6 +49,7 @@ class PrompterOverlayService : Service() {
     private var movieCreditsSingleText = ""
     private var currentFontFilePath = ""
     private var pendingInitialProgress = 0.0  // applied once on first scroll frame
+    private var skipScrollRestore = false  // when true, updateSettings won't restore scroll position
     
     // Control panel position for dragging
     private var controlX = 0
@@ -198,18 +199,21 @@ class PrompterOverlayService : Service() {
                 val needsRebuild = scrollModeVal != scrollMode || textOverlayView == null
 
                 if (needsRebuild) {
-                    val savedScroll = if (scrollMode == 1) movieCreditsOffset else (textOverlayView as? ScrollView)?.scrollY?.toFloat() ?: 0f
+                    val savedScroll = if (skipScrollRestore) 0f else if (scrollMode == 1) movieCreditsOffset else (textOverlayView as? ScrollView)?.scrollY?.toFloat() ?: 0f
                     val wasPlaying = isPlaying
                     scrollMode = scrollModeVal
                     hideOverlay()
                     showOverlay(text, fontSize, textColor, bgColor, mirror, fontFamily, isBold, isItalic, lineHeight, textAlign, opacity, paddingH, overlayPos, overlayHeight, scrollModeVal)
-                    if (scrollMode == 1) {
-                        movieCreditsOffset = savedScroll
-                    } else {
-                        (textOverlayView as? ScrollView)?.post {
-                            (textOverlayView as? ScrollView)?.scrollTo(0, savedScroll.toInt())
+                    if (!skipScrollRestore) {
+                        if (scrollMode == 1) {
+                            movieCreditsOffset = savedScroll
+                        } else {
+                            (textOverlayView as? ScrollView)?.post {
+                                (textOverlayView as? ScrollView)?.scrollTo(0, savedScroll.toInt())
+                            }
                         }
                     }
+                    skipScrollRestore = false
                     if (!wasPlaying) {
                         stopScrolling()
                         isPlaying = false
@@ -293,8 +297,14 @@ class PrompterOverlayService : Service() {
 
                             // Restore scroll position after layout completes
                             scrollView.post {
-                                val maxScroll = (scrollView.getChildAt(0)?.height ?: 0) - scrollView.height
-                                scrollView.scrollTo(0, savedScrollY.coerceIn(0, maxScroll.coerceAtLeast(0)))
+                                if (skipScrollRestore) {
+                                    scrollView.scrollTo(0, 0)
+                                    currentScrollProgress = 0.0
+                                    skipScrollRestore = false
+                                } else {
+                                    val maxScroll = (scrollView.getChildAt(0)?.height ?: 0) - scrollView.height
+                                    scrollView.scrollTo(0, savedScrollY.coerceIn(0, maxScroll.coerceAtLeast(0)))
+                                }
                             }
                         }
                     }
@@ -657,6 +667,15 @@ class PrompterOverlayService : Service() {
     }
     
     private fun startRegularScrolling() {
+        // If already at end, reset to beginning before starting
+        (textOverlayView as? ScrollView)?.let { scrollView ->
+            val currentY = scrollView.scrollY
+            val maxY = scrollView.getChildAt(0)?.height?.minus(scrollView.height) ?: 0
+            if (maxY > 0 && currentY >= maxY) {
+                scrollView.scrollTo(0, 0)
+                currentScrollProgress = 0.0
+            }
+        }
         scrollRunnable = object : Runnable {
             private var appliedInitial = false
             override fun run() {
@@ -774,6 +793,7 @@ class PrompterOverlayService : Service() {
     }
 
     private fun resetToStart() {
+        skipScrollRestore = true
         if (scrollMode == 1) {
             movieCreditsOffset = 0f
             updateMovieCreditsPositions()
