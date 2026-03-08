@@ -79,6 +79,71 @@ body {
 
 .container { max-width: 700px; margin: 0 auto; padding: 16px; }
 
+/* Responsive landscape layout */
+.main-layout { display: block; }
+.panel-preview { }
+.panel-settings { }
+
+@media (min-aspect-ratio: 1/1) and (min-width: 768px) {
+  .container {
+    max-width: 100%;
+    padding: 0;
+  }
+  .main-layout {
+    display: flex;
+    flex-direction: row;
+    height: calc(100vh - 49px - 40px); /* header + footer */
+    overflow: hidden;
+  }
+  .panel-preview {
+    flex: 0 0 50%;
+    max-width: 50%;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    overflow: hidden;
+    position: sticky;
+    top: 0;
+  }
+  .panel-settings {
+    flex: 0 0 50%;
+    max-width: 50%;
+    padding: 16px;
+    overflow-y: auto;
+    height: 100%;
+    border-left: 1px solid var(--border);
+  }
+  .panel-settings::-webkit-scrollbar {
+    width: 6px;
+  }
+  .panel-settings::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .panel-settings::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 3px;
+  }
+  .panel-preview .section {
+    margin-bottom: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .panel-preview .preview-container {
+    aspect-ratio: auto;
+    flex: 1;
+    min-height: 0;
+  }
+  .panel-settings .section:last-child {
+    margin-bottom: 0;
+  }
+  body {
+    padding-bottom: 40px;
+  }
+}
+
 .section {
   background: var(--surface);
   border-radius: var(--radius);
@@ -535,7 +600,9 @@ select {
 </div>
 
 <div class="container">
-  <!-- Live Preview -->
+<div class="main-layout">
+  <!-- Panel Preview (fixed in landscape) -->
+  <div class="panel-preview">
   <div class="section">
     <div class="section-title">Xem trước trực tiếp</div>
     <div class="preview-container" id="previewContainer">
@@ -557,8 +624,10 @@ select {
       <div class="preview-progress-fill" id="previewProgressFill"></div>
     </div>
   </div>
+  </div>
 
-  <!-- Main Controls -->
+  <!-- Panel Settings (scrollable in landscape) -->
+  <div class="panel-settings">
   <div class="section">
     <div class="section-title">Chế độ hiển thị</div>
     <div class="mode-row">
@@ -703,6 +772,8 @@ select {
       </div>
     </div>
   </div>
+  </div><!-- end panel-settings -->
+</div><!-- end main-layout -->
 </div>
 
 <div class="footer">
