@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>Prompter Remote Control</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato&family=Merriweather&family=Montserrat&family=Noto+Sans&family=Nunito&family=Open+Sans&family=Oswald&family=Playfair+Display&family=Poppins&family=Raleway&family=Roboto&family=Ubuntu&display=swap">
 <style>
 :root {
   --bg: #1a1a2e;
@@ -248,6 +249,59 @@ select {
   cursor: pointer;
 }
 
+/* Custom font picker */
+.font-picker {
+  position: relative;
+  width: 100%;
+}
+
+.font-picker-selected {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.font-picker-selected::after {
+  content: '\25BC';
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.font-picker-dropdown {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-top: 4px;
+  max-height: 280px;
+  overflow-y: auto;
+  z-index: 50;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+.font-picker-dropdown.open { display: block; }
+
+.font-picker-item {
+  padding: 10px 12px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.font-picker-item:hover { background: var(--surface2); }
+.font-picker-item.active { background: var(--primary); color: #fff; }
+
 /* Color picker */
 .color-row {
   display: flex;
@@ -432,22 +486,10 @@ select {
         <!-- Font Family -->
         <div class="slider-group">
           <div class="slider-label"><span>Font chữ</span></div>
-          <select id="fontSelect" onchange="onFontChange(this.value)">
-            <option value="Arial">Arial</option>
-            <option value="Times New Roman">Times New Roman</option>
-            <option value="Roboto" selected>Roboto</option>
-            <option value="Open Sans">Open Sans</option>
-            <option value="Lato">Lato</option>
-            <option value="Montserrat">Montserrat</option>
-            <option value="Oswald">Oswald</option>
-            <option value="Raleway">Raleway</option>
-            <option value="Poppins">Poppins</option>
-            <option value="Playfair Display">Playfair Display</option>
-            <option value="Merriweather">Merriweather</option>
-            <option value="Ubuntu">Ubuntu</option>
-            <option value="Nunito">Nunito</option>
-            <option value="Noto Sans">Noto Sans</option>
-          </select>
+          <div class="font-picker" id="fontPicker">
+            <div class="font-picker-selected" id="fontPickerSelected" onclick="toggleFontPicker()">Roboto</div>
+            <div class="font-picker-dropdown" id="fontPickerDropdown"></div>
+          </div>
         </div>
 
         <!-- Bold / Italic -->
@@ -640,14 +682,19 @@ function updateUI() {
   document.getElementById('fontSizeSlider').value = fs;
   document.getElementById('fontSizeVal').textContent = Math.round(fs) + ' px';
 
-  // Text
-  var ta = document.getElementById('textInput');
-  if (document.activeElement !== ta) {
-    ta.value = state.text || '';
-  }
+  // Text — web text is fully independent, never sync from server
+  // (text is persisted in localStorage)
 
   // Font family
-  document.getElementById('fontSelect').value = state.fontFamily || 'Roboto';
+  var currentFont = state.fontFamily || 'Roboto';
+  var selDiv = document.getElementById('fontPickerSelected');
+  selDiv.textContent = currentFont;
+  selDiv.style.fontFamily = getFontCssFamily(currentFont);
+  // Update active state in dropdown
+  var items = document.querySelectorAll('.font-picker-item');
+  items.forEach(function(item) {
+    item.classList.toggle('active', item.getAttribute('data-font') === currentFont);
+  });
 
   // Bold / Italic
   document.getElementById('btnBold').classList.toggle('active', !!state.isBold);
@@ -706,6 +753,8 @@ function selectMode(mode) {
 }
 
 function launchMode() {
+  // Apply current text before starting so the overlay uses the web remote text
+  applyText();
   var action = selectedMode === 'overlay' ? 'start_overlay' : 'start_fullscreen';
   send({type: 'command', action: action});
 }
@@ -742,12 +791,70 @@ function onFontSizeChange(val) {
 
 function applyText() {
   var text = document.getElementById('textInput').value;
+  localStorage.setItem('prompter_web_text', text);
   send({type: 'update_text', data: {text: text}});
 }
 
 function onFontChange(val) {
+  // Close dropdown
+  document.getElementById('fontPickerDropdown').classList.remove('open');
+  // Update selected display
+  var selDiv = document.getElementById('fontPickerSelected');
+  selDiv.textContent = val;
+  selDiv.style.fontFamily = getFontCssFamily(val);
+  // Update active
+  document.querySelectorAll('.font-picker-item').forEach(function(item) {
+    item.classList.toggle('active', item.getAttribute('data-font') === val);
+  });
   send({type: 'update_settings', data: {fontFamily: val}});
 }
+
+var FONT_LIST = [
+  {name:'Arial', css:'Arial,sans-serif'},
+  {name:'Times New Roman', css:"'Times New Roman',serif"},
+  {name:'Roboto', css:"'Roboto',sans-serif"},
+  {name:'Open Sans', css:"'Open Sans',sans-serif"},
+  {name:'Lato', css:"'Lato',sans-serif"},
+  {name:'Montserrat', css:"'Montserrat',sans-serif"},
+  {name:'Oswald', css:"'Oswald',sans-serif"},
+  {name:'Raleway', css:"'Raleway',sans-serif"},
+  {name:'Poppins', css:"'Poppins',sans-serif"},
+  {name:'Playfair Display', css:"'Playfair Display',serif"},
+  {name:'Merriweather', css:"'Merriweather',serif"},
+  {name:'Ubuntu', css:"'Ubuntu',sans-serif"},
+  {name:'Nunito', css:"'Nunito',sans-serif"},
+  {name:'Noto Sans', css:"'Noto Sans',sans-serif"}
+];
+
+function getFontCssFamily(name) {
+  var f = FONT_LIST.find(function(x) { return x.name === name; });
+  return f ? f.css : name;
+}
+
+function toggleFontPicker() {
+  document.getElementById('fontPickerDropdown').classList.toggle('open');
+}
+
+function initFontPicker() {
+  var dropdown = document.getElementById('fontPickerDropdown');
+  FONT_LIST.forEach(function(f) {
+    var div = document.createElement('div');
+    div.className = 'font-picker-item';
+    div.setAttribute('data-font', f.name);
+    div.textContent = f.name;
+    div.style.fontFamily = f.css;
+    div.onclick = function() { onFontChange(f.name); };
+    dropdown.appendChild(div);
+  });
+}
+
+// Close font picker when clicking outside
+document.addEventListener('click', function(e) {
+  var picker = document.getElementById('fontPicker');
+  if (picker && !picker.contains(e.target)) {
+    document.getElementById('fontPickerDropdown').classList.remove('open');
+  }
+});
 
 function toggleBold() {
   send({type: 'update_settings', data: {isBold: !state.isBold}});
@@ -856,6 +963,16 @@ function argbToCss(hex) {
 
 // Start
 initColorSwatches();
+initFontPicker();
+// Load web text from localStorage (independent from app)
+var savedText = localStorage.getItem('prompter_web_text');
+if (savedText !== null) {
+  document.getElementById('textInput').value = savedText;
+}
+// Save web text on input
+document.getElementById('textInput').addEventListener('input', function() {
+  localStorage.setItem('prompter_web_text', this.value);
+});
 connect();
 </script>
 </body>

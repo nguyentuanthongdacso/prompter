@@ -55,6 +55,7 @@ class MainActivity : FlutterActivity() {
                     val overlayPos = (call.argument<Number>("overlayPosition")?.toInt()) ?: 2
                     val overlayHeight = call.argument<Double>("overlayHeight")?.toFloat() ?: 150f
                     val scrollMode = (call.argument<Number>("scrollMode")?.toInt()) ?: 0
+                    val fontFilePath = call.argument<String>("fontFilePath") ?: ""
                     
                     val intent = Intent(this, PrompterOverlayService::class.java).apply {
                         action = PrompterOverlayService.ACTION_SHOW
@@ -74,6 +75,7 @@ class MainActivity : FlutterActivity() {
                         putExtra(PrompterOverlayService.EXTRA_OVERLAY_POS, overlayPos)
                         putExtra(PrompterOverlayService.EXTRA_OVERLAY_HEIGHT, overlayHeight)
                         putExtra(PrompterOverlayService.EXTRA_SCROLL_MODE, scrollMode)
+                        putExtra(PrompterOverlayService.EXTRA_FONT_FILE_PATH, fontFilePath)
                     }
                     
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -120,6 +122,7 @@ class MainActivity : FlutterActivity() {
                     val overlayPos = (call.argument<Number>("overlayPosition")?.toInt()) ?: 2
                     val overlayHeight = call.argument<Double>("overlayHeight")?.toFloat() ?: 150f
                     val scrollMode = (call.argument<Number>("scrollMode")?.toInt()) ?: 0
+                    val fontFilePath = call.argument<String>("fontFilePath") ?: ""
                     
                     val intent = Intent(this, PrompterOverlayService::class.java).apply {
                         action = PrompterOverlayService.ACTION_UPDATE_SETTINGS
@@ -139,6 +142,7 @@ class MainActivity : FlutterActivity() {
                         putExtra(PrompterOverlayService.EXTRA_OVERLAY_POS, overlayPos)
                         putExtra(PrompterOverlayService.EXTRA_OVERLAY_HEIGHT, overlayHeight)
                         putExtra(PrompterOverlayService.EXTRA_SCROLL_MODE, scrollMode)
+                        putExtra(PrompterOverlayService.EXTRA_FONT_FILE_PATH, fontFilePath)
                     }
                     startService(intent)
                     result.success(true)

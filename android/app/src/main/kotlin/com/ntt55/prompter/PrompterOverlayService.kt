@@ -47,6 +47,7 @@ class PrompterOverlayService : Service() {
     private var movieCreditsLaneWidth = 0     // width of one lane (screen width)
     private var movieCreditsTextViews = mutableListOf<TextView>()
     private var movieCreditsSingleText = ""
+    private var currentFontFilePath = ""
     
     // Control panel position for dragging
     private var controlX = 0
@@ -86,6 +87,7 @@ class PrompterOverlayService : Service() {
         const val EXTRA_OVERLAY_POS = "overlayPosition"
         const val EXTRA_OVERLAY_HEIGHT = "overlayHeight"
         const val EXTRA_SCROLL_MODE = "scrollMode"
+        const val EXTRA_FONT_FILE_PATH = "fontFilePath"
         
         // Static state for overlay→app sync
         var isRunning = false
@@ -105,6 +107,33 @@ class PrompterOverlayService : Service() {
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         scrollHandler = Handler(Looper.getMainLooper())
         createNotificationChannel()
+    }
+
+    /// Resolve a Typeface: prefer loading from a downloaded TTF file path,
+    /// fall back to system font family name.
+    private fun resolveTypeface(fontFilePath: String, fontFamily: String, typefaceStyle: Int): android.graphics.Typeface {
+        // Try loading from file first
+        if (fontFilePath.isNotEmpty()) {
+            try {
+                val file = java.io.File(fontFilePath)
+                if (file.exists() && file.length() > 0) {
+                    val base = android.graphics.Typeface.createFromFile(file)
+                    return android.graphics.Typeface.create(base, typefaceStyle)
+                }
+            } catch (_: Exception) {}
+        }
+        // Map common font names to Android system font families
+        val androidFamily = when (fontFamily.lowercase()) {
+            "times new roman", "times", "georgia", "playfair display", "merriweather" -> "serif"
+            "arial", "helvetica", "verdana" -> "sans-serif"
+            "courier new", "courier" -> "monospace"
+            else -> fontFamily
+        }
+        return try {
+            android.graphics.Typeface.create(androidFamily, typefaceStyle)
+        } catch (_: Exception) {
+            android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, typefaceStyle)
+        }
     }
     
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -131,6 +160,7 @@ class PrompterOverlayService : Service() {
                 currentSpeed = scrollSpeed
                 currentColor = textColor
                 scrollMode = scrollModeVal
+                currentFontFilePath = intent.getStringExtra(EXTRA_FONT_FILE_PATH) ?: ""
                 showOverlay(text, fontSize, textColor, bgColor, mirror, fontFamily, isBold, isItalic, lineHeight, textAlign, opacity, paddingH, overlayPos, overlayHeight, scrollModeVal)
                 startForeground(NOTIFICATION_ID, createNotification())
             }
@@ -156,6 +186,7 @@ class PrompterOverlayService : Service() {
                 currentSpeed = newSpeed
                 currentTextColor = textColor
                 currentColor = textColor
+                currentFontFilePath = intent.getStringExtra(EXTRA_FONT_FILE_PATH) ?: ""
 
                 // Only do a full rebuild if scroll mode changed or views don't exist yet
                 val needsRebuild = scrollModeVal != scrollMode || textOverlayView == null
@@ -199,11 +230,7 @@ class PrompterOverlayService : Service() {
                         isItalic -> android.graphics.Typeface.ITALIC
                         else -> android.graphics.Typeface.NORMAL
                     }
-                    val typeface = try {
-                        android.graphics.Typeface.create(fontFamily, typefaceStyle)
-                    } catch (e: Exception) {
-                        android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, typefaceStyle)
-                    }
+                    val typeface = resolveTypeface(currentFontFilePath, fontFamily, typefaceStyle)
 
                     val gravityAlign = when (textAlign) {
                         0 -> Gravity.START
@@ -241,17 +268,29 @@ class PrompterOverlayService : Service() {
                         val scrollView = textOverlayView as? ScrollView
                         val textView = scrollView?.tag as? TextView
 
-                        textView?.textSize = fontSize
-                        textView?.setTextColor(textColor)
-                        textView?.typeface = typeface
-                        textView?.setLineSpacing(0f, lineHeight)
-                        textView?.gravity = gravityAlign
-                        textView?.setPadding(paddingPx, vertPadding, paddingPx, vertPadding)
-                        textView?.setShadowLayer(4f, 2f, 2f, shadowColor)
-                        textView?.text = text
+                        if (textView != null && scrollView != null) {
+                            // Save scroll position before property changes
+                            val savedScrollY = scrollView.scrollY
 
-                        scrollView?.setBackgroundColor(finalBgColor)
-                        scrollView?.scaleX = if (mirror) -1f else 1f
+                            // Batch all property updates, then single relayout
+                            textView.textSize = fontSize
+                            textView.setTextColor(textColor)
+                            textView.typeface = typeface
+                            textView.setLineSpacing(0f, lineHeight)
+                            textView.gravity = gravityAlign
+                            textView.setPadding(paddingPx, vertPadding, paddingPx, vertPadding)
+                            textView.setShadowLayer(4f, 2f, 2f, shadowColor)
+                            textView.text = text
+
+                            scrollView.setBackgroundColor(finalBgColor)
+                            scrollView.scaleX = if (mirror) -1f else 1f
+
+                            // Restore scroll position after layout completes
+                            scrollView.post {
+                                val maxScroll = (scrollView.getChildAt(0)?.height ?: 0) - scrollView.height
+                                scrollView.scrollTo(0, savedScrollY.coerceIn(0, maxScroll.coerceAtLeast(0)))
+                            }
+                        }
                     }
 
                     // Update overlay position and height via WindowManager (no rebuild)
@@ -407,11 +446,7 @@ class PrompterOverlayService : Service() {
         }
         
         // Font family typeface
-        val typeface = try {
-            android.graphics.Typeface.create(fontFamily, typefaceStyle)
-        } catch (e: Exception) {
-            android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, typefaceStyle)
-        }
+        val typeface = resolveTypeface(currentFontFilePath, fontFamily, typefaceStyle)
         
         val scrollView = ScrollView(this).apply {
             id = View.generateViewId()
@@ -896,11 +931,7 @@ class PrompterOverlayService : Service() {
             isItalic -> android.graphics.Typeface.ITALIC
             else -> android.graphics.Typeface.NORMAL
         }
-        val typeface = try {
-            android.graphics.Typeface.create(fontFamily, typefaceStyle)
-        } catch (e: Exception) {
-            android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, typefaceStyle)
-        }
+        val typeface = resolveTypeface(currentFontFilePath, fontFamily, typefaceStyle)
         val paddingPx = (paddingH * density).toInt()
         val vertPadding = (16 * density).toInt()
         val widthSpec = View.MeasureSpec.makeMeasureSpec(
@@ -963,11 +994,7 @@ class PrompterOverlayService : Service() {
             isItalic -> android.graphics.Typeface.ITALIC
             else -> android.graphics.Typeface.NORMAL
         }
-        val typeface = try {
-            android.graphics.Typeface.create(fontFamily, typefaceStyle)
-        } catch (e: Exception) {
-            android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, typefaceStyle)
-        }
+        val typeface = resolveTypeface(currentFontFilePath, fontFamily, typefaceStyle)
         val tempTv = TextView(this).apply {
             text = "Ag"
             textSize = fontSize
@@ -1006,11 +1033,7 @@ class PrompterOverlayService : Service() {
             isItalic -> android.graphics.Typeface.ITALIC
             else -> android.graphics.Typeface.NORMAL
         }
-        val typeface = try {
-            android.graphics.Typeface.create(fontFamily, typefaceStyle)
-        } catch (e: Exception) {
-            android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, typefaceStyle)
-        }
+        val typeface = resolveTypeface(currentFontFilePath, fontFamily, typefaceStyle)
         
         val shadowColor = if (textColor == Color.WHITE || textColor == Color.YELLOW) Color.BLACK else Color.WHITE
         

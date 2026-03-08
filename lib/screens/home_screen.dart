@@ -11,6 +11,7 @@ import '../widgets/text_preview.dart';
 import '../widgets/color_picker_dialog.dart';
 import '../services/native_overlay_service.dart';
 import '../services/remote_server_service.dart';
+import '../services/font_cache_service.dart';
 import 'prompter_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -27,6 +28,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   bool _isOverlayActive = false;
   StreamSubscription<String>? _remoteCommandSub;
   Timer? _overlayPollTimer;
+  String _currentFontFilePath = '';
+  String _currentFontKey = ''; // tracks which font was last downloaded
+  Timer? _settingsDebounce;
+  String? _overlayTextOverride; // when set, overlay uses this instead of app text
 
   bool get _isAndroid => !kIsWeb && Platform.isAndroid;
 
@@ -46,19 +51,66 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       // Listen for remote commands (start_fullscreen, start_overlay)
       final remoteService = Provider.of<RemoteServerService>(context, listen: false);
       _remoteCommandSub = remoteService.commandStream.listen(_onRemoteCommand);
+      // Pre-load Google Fonts so dropdown shows actual font styles
+      _preloadGoogleFonts();
+    });
+  }
+
+  void _preloadGoogleFonts() {
+    const systemFonts = ['Arial', 'Times New Roman'];
+    for (final font in PrompterSettings.availableFonts) {
+      if (!systemFonts.contains(font)) {
+        try {
+          GoogleFonts.getFont(font);
+        } catch (_) {}
+      }
+    }
+    // Rebuild after fonts load
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) setState(() {});
     });
   }
 
   /// Push settings to overlay whenever they change in the app
   void _onSettingsChanged() {
     if (!_isOverlayActive) return;
-    final settings = Provider.of<PrompterSettings>(context, listen: false);
+    // Debounce: coalesce rapid changes into one update
+    _settingsDebounce?.cancel();
+    _settingsDebounce = Timer(const Duration(milliseconds: 50), () {
+      _pushSettingsToOverlay();
+    });
+  }
 
-    // Push all current settings to the native overlay.
-    // The Kotlin side now does in-place view updates (no rebuild)
-    // unless structural properties changed (e.g. scrollMode).
+  Future<void> _pushSettingsToOverlay() async {
+    final settings = Provider.of<PrompterSettings>(context, listen: false);
+    final fontKey = '${settings.fontFamily}_${settings.isBold}_${settings.isItalic}';
+
+    // Send update immediately with whatever font path we have cached
+    _sendOverlayUpdate(settings);
+
+    // If font changed, download new font file in background, then push again
+    if (fontKey != _currentFontKey) {
+      _currentFontKey = fontKey;
+      final fontPath = await FontCacheService.ensureFontFile(
+        settings.fontFamily,
+        isBold: settings.isBold,
+        isItalic: settings.isItalic,
+      );
+      final newPath = fontPath ?? '';
+      if (newPath != _currentFontFilePath) {
+        _currentFontFilePath = newPath;
+        // Push again with the correct font file
+        if (_isOverlayActive && mounted) {
+          final s = Provider.of<PrompterSettings>(context, listen: false);
+          _sendOverlayUpdate(s);
+        }
+      }
+    }
+  }
+
+  void _sendOverlayUpdate(PrompterSettings settings) {
     NativeOverlayService.updateSettings(
-      text: settings.text,
+      text: _overlayTextOverride ?? settings.text,
       fontSize: settings.fontSize,
       textColor: settings.textColor.toARGB32(),
       backgroundColor: settings.backgroundColor.toARGB32(),
@@ -74,6 +126,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       overlayPosition: settings.overlayPosition.index,
       overlayHeight: settings.overlayHeight,
       scrollMode: settings.scrollMode.index,
+      fontFilePath: _currentFontFilePath,
     );
   }
 
@@ -82,10 +135,18 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     if (!mounted) return;
     switch (command) {
       case 'start_fullscreen':
-        _startPrompter();
+        _startPrompter(fromRemote: true);
         break;
       case 'start_overlay':
-        _startOverlay();
+        _startOverlay(fromRemote: true);
+        break;
+      case 'apply_text':
+        final remoteService = Provider.of<RemoteServerService>(context, listen: false);
+        _overlayTextOverride = remoteService.remoteText;
+        if (_isOverlayActive) {
+          final s = Provider.of<PrompterSettings>(context, listen: false);
+          _sendOverlayUpdate(s);
+        }
         break;
       case 'play':
       case 'pause':
@@ -188,6 +249,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     }
     _remoteCommandSub?.cancel();
     _overlayPollTimer?.cancel();
+    _settingsDebounce?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     final settings = Provider.of<PrompterSettings>(context, listen: false);
     settings.removeListener(_onSettingsChanged);
@@ -196,7 +258,17 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     super.dispose();
   }
 
-  void _startPrompter() {
+  void _startPrompter({bool fromRemote = false}) {
+    if (fromRemote) {
+      // Use web remote text
+      final remoteService = Provider.of<RemoteServerService>(context, listen: false);
+      final settings = Provider.of<PrompterSettings>(context, listen: false);
+      settings.setText(remoteService.remoteText);
+    } else {
+      // Use app's text
+      final settings = Provider.of<PrompterSettings>(context, listen: false);
+      settings.setText(_textController.text);
+    }
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -205,17 +277,35 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
-  Future<void> _startOverlay() async {
+  Future<void> _startOverlay({bool fromRemote = false}) async {
     if (!_hasOverlayPermission) {
       await _requestOverlayPermission();
       if (!_hasOverlayPermission) return;
     }
 
     final settings = Provider.of<PrompterSettings>(context, listen: false);
+
+    if (fromRemote) {
+      // Use web remote text for overlay
+      final remoteService = Provider.of<RemoteServerService>(context, listen: false);
+      _overlayTextOverride = remoteService.remoteText;
+    } else {
+      // Use app's text for overlay
+      _overlayTextOverride = null;
+      settings.setText(_textController.text);
+    }
     
+    // Download font file for native overlay
+    final fontPath = await FontCacheService.ensureFontFile(
+      settings.fontFamily,
+      isBold: settings.isBold,
+      isItalic: settings.isItalic,
+    );
+    _currentFontFilePath = fontPath ?? '';
+
     // Use native 2-layer overlay service with all settings
     await NativeOverlayService.showOverlay(
-      text: settings.text,
+      text: _overlayTextOverride ?? settings.text,
       fontSize: settings.fontSize,
       textColor: settings.textColor.toARGB32(),
       backgroundColor: settings.backgroundColor.toARGB32(),
@@ -231,6 +321,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       overlayPosition: settings.overlayPosition.index,
       overlayHeight: settings.overlayHeight,
       scrollMode: settings.scrollMode.index,
+      fontFilePath: _currentFontFilePath,
     );
     
     setState(() => _isOverlayActive = true);
@@ -421,12 +512,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   const systemFonts = ['Arial', 'Times New Roman'];
                   TextStyle fontStyle;
                   if (systemFonts.contains(font)) {
-                    fontStyle = TextStyle(fontFamily: font);
+                    fontStyle = TextStyle(fontFamily: font, fontSize: 16);
                   } else {
                     try {
-                      fontStyle = GoogleFonts.getFont(font);
+                      fontStyle = GoogleFonts.getFont(font, fontSize: 16);
                     } catch (e) {
-                      fontStyle = const TextStyle();
+                      fontStyle = const TextStyle(fontSize: 16);
                     }
                   }
                   return DropdownMenuItem(

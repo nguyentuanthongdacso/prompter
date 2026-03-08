@@ -41,6 +41,7 @@ class NativeOverlayService {
     int overlayPosition = 2, // 0=top, 1=center, 2=bottom
     double overlayHeight = 150.0,
     int scrollMode = 0,
+    String fontFilePath = '',
   }) async {
     try {
       final bool result = await _channel.invokeMethod('showOverlay', {
@@ -60,6 +61,7 @@ class NativeOverlayService {
         'overlayPosition': overlayPosition,
         'overlayHeight': overlayHeight,
         'scrollMode': scrollMode,
+        'fontFilePath': fontFilePath,
       });
       return result;
     } catch (e) {
@@ -107,6 +109,7 @@ class NativeOverlayService {
     int overlayPosition = 2,
     double overlayHeight = 150.0,
     int scrollMode = 0,
+    String fontFilePath = '',
   }) async {
     try {
       final bool result = await _channel.invokeMethod('updateSettings', {
@@ -126,6 +129,7 @@ class NativeOverlayService {
         'overlayPosition': overlayPosition,
         'overlayHeight': overlayHeight,
         'scrollMode': scrollMode,
+        'fontFilePath': fontFilePath,
       });
       return result;
     } catch (e) {

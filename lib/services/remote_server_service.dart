@@ -83,6 +83,10 @@ class RemoteServerService extends ChangeNotifier {
   String? _webHtml;
   bool _suppressBroadcast = false;
 
+  // The latest text from the web remote UI (independent from app text)
+  String _remoteText = '';
+  String get remoteText => _remoteText;
+
   // Stream for UI-level commands (e.g. start_fullscreen, start_overlay)
   final _commandController = StreamController<String>.broadcast();
   Stream<String> get commandStream => _commandController.stream;
@@ -272,10 +276,11 @@ class RemoteServerService extends ChangeNotifier {
           if (data is Map<String, dynamic>) {
             final text = data['text'];
             if (text is String && text.length <= 100000) {
-              _settings.setText(text);
+              _remoteText = text;
+              _commandController.add('apply_text');
             }
           }
-          break;
+          return; // Don't broadcast — web text is independent from app text
         case 'command':
           final action = msg['action'] as String?;
           if (action != null) _handleCommand(action);
