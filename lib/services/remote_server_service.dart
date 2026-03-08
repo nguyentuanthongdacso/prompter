@@ -82,10 +82,19 @@ class RemoteServerService extends ChangeNotifier {
   String? _localIp;
   String? _webHtml;
   bool _suppressBroadcast = false;
+  set suppressBroadcast(bool v) => _suppressBroadcast = v;
 
   // The latest text from the web remote UI (independent from app text)
   String _remoteText = '';
   String get remoteText => _remoteText;
+
+  // Track current display state for newly connecting clients
+  String _displayMode = '';
+  bool _displayActive = false;
+
+  // Last known scroll progress (0.0–1.0) for resuming across mode switches
+  double _lastScrollProgress = 0.0;
+  double get lastScrollProgress => _lastScrollProgress;
 
   // Stream for UI-level commands (e.g. start_fullscreen, start_overlay)
   final _commandController = StreamController<String>.broadcast();
@@ -128,6 +137,17 @@ class RemoteServerService extends ChangeNotifier {
         'type': 'full_sync',
         'data': _settings.toJson(),
       });
+
+      // Send current display state if active
+      if (_displayActive) {
+        _sendTo(ws, {
+          'type': 'display_state',
+          'data': {
+            'mode': _displayMode,
+            'isActive': true,
+          },
+        });
+      }
 
       // Send status
       _broadcastStatus();
@@ -327,10 +347,39 @@ class RemoteServerService extends ChangeNotifier {
       case 'start_overlay':
       case 'stop_display':
       case 'reset':
+      case 'rewind':
       case 'forward':
         _commandController.add(action);
         break;
     }
+  }
+
+  /// Broadcast scroll progress (0.0–1.0) to all connected web clients.
+  /// Called from PrompterScreen / HomeScreen at ~10 Hz.
+  void broadcastScrollProgress(double progress, {String mode = 'fullscreen'}) {
+    _lastScrollProgress = progress.clamp(0.0, 1.0);
+    if (!_isRunning || _clients.isEmpty) return;
+    _broadcast({
+      'type': 'scroll_progress',
+      'data': {
+        'progress': _lastScrollProgress,
+        'mode': mode,
+      },
+    });
+  }
+
+  /// Broadcast display state (active/inactive, mode) to web clients.
+  void broadcastDisplayState({required String mode, required bool isActive}) {
+    _displayMode = mode;
+    _displayActive = isActive;
+    if (!_isRunning || _clients.isEmpty) return;
+    _broadcast({
+      'type': 'display_state',
+      'data': {
+        'mode': mode,
+        'isActive': isActive,
+      },
+    });
   }
 
   Future<String?> _getLocalIpAddress() async {

@@ -42,6 +42,7 @@ class NativeOverlayService {
     double overlayHeight = 150.0,
     int scrollMode = 0,
     String fontFilePath = '',
+    double initialProgress = 0.0,
   }) async {
     try {
       final bool result = await _channel.invokeMethod('showOverlay', {
@@ -62,6 +63,7 @@ class NativeOverlayService {
         'overlayHeight': overlayHeight,
         'scrollMode': scrollMode,
         'fontFilePath': fontFilePath,
+        'initialProgress': initialProgress,
       });
       return result;
     } catch (e) {
@@ -167,10 +169,17 @@ class NativeOverlayService {
     } catch (_) {}
   }
 
-  /// Reset scroll to beginning on the overlay
+  /// Rewind scroll (back 200px) on the overlay
   static Future<void> resetScroll() async {
     try {
       await _channel.invokeMethod('overlayResetScroll');
+    } catch (_) {}
+  }
+
+  /// Reset scroll to the very beginning (position 0) on the overlay
+  static Future<void> resetToStart() async {
+    try {
+      await _channel.invokeMethod('overlayResetToStart');
     } catch (_) {}
   }
 

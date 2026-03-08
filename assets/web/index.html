@@ -420,6 +420,108 @@ select {
   background: var(--primary);
   color: #fff;
 }
+
+/* Live Preview */
+.preview-container {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 2px solid var(--border);
+  background: #000;
+}
+
+.preview-viewport {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.preview-scroll-area {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  will-change: transform;
+}
+
+.preview-center-line {
+  position: absolute;
+  top: 33.33%;
+  left: 0;
+  width: 24px;
+  height: 1px;
+  background: rgba(255,255,255,0.4);
+  z-index: 2;
+  pointer-events: none;
+}
+
+.preview-status-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.preview-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--surface2);
+  font-size: 11px;
+}
+
+.preview-badge.live {
+  background: rgba(46,204,113,0.15);
+  color: var(--success);
+}
+
+.preview-badge.idle {
+  color: var(--text-muted);
+}
+
+.preview-progress-bar {
+  width: 100%;
+  height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+  margin-top: 6px;
+  overflow: hidden;
+}
+
+.preview-progress-fill {
+  height: 100%;
+  background: var(--primary);
+  border-radius: 2px;
+  transition: width 0.15s linear;
+  width: 0%;
+}
+
+/* Movie credits preview */
+.preview-credits-wrap {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.preview-credits-line {
+  overflow: hidden;
+  white-space: nowrap;
+  width: 100%;
+}
+.preview-credits-line > span {
+  will-change: transform;
+}
 </style>
 </head>
 <body>
@@ -433,6 +535,29 @@ select {
 </div>
 
 <div class="container">
+  <!-- Live Preview -->
+  <div class="section">
+    <div class="section-title">Xem trước trực tiếp</div>
+    <div class="preview-container" id="previewContainer">
+      <div class="preview-viewport" id="previewViewport">
+        <div class="preview-scroll-area" id="previewScrollArea"></div>
+        <div class="preview-credits-wrap" id="previewCreditsWrap" style="display:none">
+          <div class="preview-credits-line" id="previewCL1"></div>
+          <div class="preview-credits-line" id="previewCL2"></div>
+          <div class="preview-credits-line" id="previewCL3"></div>
+        </div>
+      </div>
+      <div class="preview-center-line"></div>
+    </div>
+    <div class="preview-status-bar">
+      <span class="preview-badge idle" id="previewBadge">⏸ Chờ trình chiếu</span>
+      <span id="previewProgress">0%</span>
+    </div>
+    <div class="preview-progress-bar">
+      <div class="preview-progress-fill" id="previewProgressFill"></div>
+    </div>
+  </div>
+
   <!-- Main Controls -->
   <div class="section">
     <div class="section-title">Chế độ hiển thị</div>
@@ -445,7 +570,7 @@ select {
     </div>
     <div class="section-title">Điều khiển</div>
     <div class="controls-row">
-      <button class="btn btn-secondary" onclick="sendReset()" title="Tua về đầu">⏮</button>
+      <button class="btn btn-secondary" onclick="sendRewind()" title="Tua lại">⏮</button>
       <button class="btn btn-play" id="btnPlay" onclick="togglePlay()">▶ Play</button>
       <button class="btn btn-secondary" onclick="sendForward()" title="Tua tới">⏭</button>
     </div>
@@ -471,7 +596,8 @@ select {
     <div class="section-title">Văn bản</div>
     <textarea class="text-area" id="textInput" placeholder="Nhập văn bản cần hiển thị..."></textarea>
     <div class="text-actions">
-      <button class="btn btn-text" onclick="applyText()">Áp dụng văn bản</button>
+      <button class="btn btn-text" onclick="applyText()">Chỉnh sửa văn bản</button>
+      <button class="btn btn-text" onclick="changeText()" style="background:var(--primary);color:#fff">🔄 Thay đổi văn bản</button>
     </div>
   </div>
 
@@ -634,12 +760,25 @@ function connect() {
     var msg;
     try { msg = JSON.parse(event.data); } catch(e) { return; }
     if (msg.type === 'full_sync' || msg.type === 'state_update') {
+      var wasPlaying = state.isPlaying;
       state = Object.assign(state, msg.data);
       updateUI();
+      updatePreview();
+      // Update animation based on play/pause state changes
+      if (displayActive) {
+        updatePreviewBadge();
+        ensureAnimLoop();
+      }
     }
     if (msg.type === 'status') {
       var count = msg.data.connectedClients || 0;
       document.getElementById('clientCount').textContent = count + ' thiết bị kết nối';
+    }
+    if (msg.type === 'scroll_progress') {
+      onScrollProgress(msg.data.progress, msg.data.mode);
+    }
+    if (msg.type === 'display_state') {
+      onDisplayState(msg.data.mode, msg.data.isActive);
     }
   };
 }
@@ -735,6 +874,9 @@ function updateUI() {
   // Color highlights
   updateColorSwatches('textColorRow', state.textColor);
   updateColorSwatches('bgColorRow', state.backgroundColor);
+
+  // Update preview badge
+  updatePreviewBadge();
 }
 
 function updateColorSwatches(rowId, activeHex) {
@@ -753,7 +895,6 @@ function selectMode(mode) {
 }
 
 function launchMode() {
-  // Apply current text before starting so the overlay uses the web remote text
   applyText();
   var action = selectedMode === 'overlay' ? 'start_overlay' : 'start_fullscreen';
   send({type: 'command', action: action});
@@ -763,8 +904,8 @@ function togglePlay() {
   send({type: 'command', action: 'toggle'});
 }
 
-function sendReset() {
-  send({type: 'command', action: 'reset'});
+function sendRewind() {
+  send({type: 'command', action: 'rewind'});
 }
 
 function sendForward() {
@@ -793,6 +934,13 @@ function applyText() {
   var text = document.getElementById('textInput').value;
   localStorage.setItem('prompter_web_text', text);
   send({type: 'update_text', data: {text: text}});
+}
+
+function changeText() {
+  var text = document.getElementById('textInput').value;
+  localStorage.setItem('prompter_web_text', text);
+  send({type: 'update_text', data: {text: text}});
+  send({type: 'command', action: 'reset'});
 }
 
 function onFontChange(val) {
@@ -959,6 +1107,320 @@ function argbToCss(hex) {
   var g = parseInt(h.substring(4,6), 16);
   var b = parseInt(h.substring(6,8), 16);
   return 'rgba(' + r + ',' + g + ',' + b + ',' + a.toFixed(2) + ')';
+}
+
+// --- Live Preview (smooth 60fps animation engine) ---
+var displayMode = '';  // 'fullscreen' or 'overlay'
+var displayActive = false;
+
+// Animation state
+var targetProgress = 0;   // target progress from server (0–1)
+var currentProgress = 0;  // currently rendered progress (smoothly interpolated)
+var animRafId = null;
+var animLastTime = 0;
+var lerpSpeed = 8;        // interpolation speed (higher = snappier)
+var snapThreshold = 0.08; // if jump > 8%, snap instantly (handles reset/forward)
+
+// Client-side estimation (fallback when server stops sending)
+var lastServerTime = 0;   // when we last got server data
+var estimating = false;   // true = server hasn't sent data recently, we self-drive
+
+// Movie credits
+var mcTargetOffset = 0;   // target offset from server
+var mcCurrentOffset = 0;  // currently rendered offset
+var mcEstimating = false;
+var mcSnapThreshold = 40; // px jump threshold for instant snap
+
+// Text cache to avoid unnecessary DOM re-layout
+var cachedPreviewText = null;
+var cachedPreviewStyles = null;
+
+// Compute a scale factor so preview text is readable.
+// We pretend the device screen is ~600px wide and scale to the preview container width.
+function getPreviewScale() {
+  var container = document.getElementById('previewContainer');
+  if (!container) return 0.3;
+  return container.offsetWidth / 600;
+}
+
+function updatePreview() {
+  var viewport = document.getElementById('previewViewport');
+  var scrollArea = document.getElementById('previewScrollArea');
+  var creditsWrap = document.getElementById('previewCreditsWrap');
+  if (!viewport || !scrollArea) return;
+
+  var scale = getPreviewScale();
+
+  // Background
+  var bgCss = '#000';
+  if (state.backgroundColor) {
+    var h = (state.backgroundColor || '').replace('#','');
+    if (h.length >= 8) {
+      var r = parseInt(h.substring(2,4), 16);
+      var g = parseInt(h.substring(4,6), 16);
+      var b = parseInt(h.substring(6,8), 16);
+      var a = state.opacity != null ? state.opacity : 1;
+      bgCss = 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
+    }
+  }
+  viewport.style.background = bgCss;
+
+  // Common text styles
+  var fontCss = getFontCssFamily(state.fontFamily || 'Roboto');
+  var fontSize = (state.fontSize || 32) * scale;
+  var textColor = state.textColor ? argbToCss(state.textColor) : '#fff';
+  var lh = state.lineHeight || 1.5;
+  var fw = state.isBold ? 'bold' : 'normal';
+  var fst = state.isItalic ? 'italic' : 'normal';
+  var ph = (state.paddingHorizontal || 20) * scale;
+
+  var isCredits = state.scrollMode === 'movieCredits';
+  scrollArea.style.display = isCredits ? 'none' : 'block';
+  creditsWrap.style.display = isCredits ? 'flex' : 'none';
+
+  if (!isCredits) {
+    // --- Vertical scroll mode ---
+    var container = document.getElementById('previewContainer');
+    var containerH = container ? container.offsetHeight : 200;
+    var topPad = containerH / 3; // reading line at upper third
+
+    // Build a style key to detect actual changes
+    var styleKey = fontCss + '|' + fontSize + '|' + textColor + '|' + lh + '|' + fw + '|' + fst + '|' + ph + '|' + topPad + '|' + (state.textAlign || 'center');
+    var textChanged = (state.text || '') !== cachedPreviewText;
+    var styleChanged = styleKey !== cachedPreviewStyles;
+
+    if (textChanged || styleChanged) {
+      if (textChanged) {
+        scrollArea.textContent = state.text || '';
+        cachedPreviewText = state.text || '';
+      }
+      if (styleChanged) {
+        scrollArea.style.fontFamily = fontCss;
+        scrollArea.style.fontSize = fontSize + 'px';
+        scrollArea.style.color = textColor;
+        scrollArea.style.lineHeight = lh;
+        scrollArea.style.fontWeight = fw;
+        scrollArea.style.fontStyle = fst;
+        scrollArea.style.padding = topPad + 'px ' + ph + 'px';
+        var ta = state.textAlign === 'left' ? 'left' : state.textAlign === 'right' ? 'right' : 'center';
+        scrollArea.style.textAlign = ta;
+        cachedPreviewStyles = styleKey;
+      }
+    }
+    // Don't apply scroll here — let the animation loop handle it to avoid stale layout
+  } else {
+    // --- Movie Credits mode ---
+    var text = (state.text || '').replace(/\n/g, '     ') + '     ';
+    var lineStyle = 'font-family:' + fontCss + ';font-size:' + fontSize + 'px;color:' + textColor + ';line-height:' + lh + ';font-weight:' + fw + ';font-style:' + fst + ';';
+    var repeatedHtml = escapeHtml(text).repeat(8);
+
+    creditsWrap.style.transform = state.mirrorHorizontal ? 'scaleX(-1)' : '';
+    creditsWrap.style.padding = '0 ' + ph + 'px';
+
+    for (var i = 1; i <= 3; i++) {
+      var line = document.getElementById('previewCL' + i);
+      if (line) {
+        line.innerHTML = '<span style="' + lineStyle + 'display:inline-block">' + repeatedHtml + '</span>';
+      }
+    }
+  }
+}
+
+function applyPreviewScroll(progress) {
+  var scrollArea = document.getElementById('previewScrollArea');
+  var container = document.getElementById('previewContainer');
+  if (!scrollArea || !container) return;
+
+  var containerH = container.offsetHeight;
+  var contentH = scrollArea.scrollHeight;
+  var scrollableH = contentH - containerH;
+
+  var mirror = state.mirrorHorizontal ? ' scaleX(-1)' : '';
+  if (scrollableH <= 0) {
+    scrollArea.style.transform = 'translate3d(0,0,0)' + mirror;
+    return;
+  }
+
+  var offset = Math.round(scrollableH * progress);
+  scrollArea.style.transform = 'translate3d(0,' + (-offset) + 'px,0)' + mirror;
+}
+
+function onScrollProgress(progress, mode) {
+  displayMode = mode;
+  displayActive = true;
+  lastServerTime = Date.now();
+  estimating = false;
+  mcEstimating = false;
+
+  if (state.scrollMode === 'movieCredits') {
+    var container = document.getElementById('previewContainer');
+    var laneW = container ? container.offsetWidth : 300;
+    var line1 = document.getElementById('previewCL1');
+    var cycleW = laneW;
+    if (line1 && line1.firstChild) cycleW = line1.firstChild.scrollWidth / 8;
+    var newMcOffset = progress * cycleW;
+    // Snap instantly for large jumps (reset/forward)
+    if (Math.abs(newMcOffset - mcCurrentOffset) > mcSnapThreshold) {
+      mcCurrentOffset = newMcOffset;
+    }
+    mcTargetOffset = newMcOffset;
+  } else {
+    // Snap instantly for large jumps (reset/forward)
+    if (Math.abs(progress - currentProgress) > snapThreshold) {
+      currentProgress = progress;
+    }
+    targetProgress = progress;
+  }
+
+  // Update progress bar
+  var pct = Math.round(progress * 100);
+  var progressEl = document.getElementById('previewProgress');
+  var fillEl = document.getElementById('previewProgressFill');
+  if (progressEl) progressEl.textContent = pct + '%';
+  if (fillEl) fillEl.style.width = pct + '%';
+
+  updatePreviewBadge();
+  ensureAnimLoop();
+}
+
+function onDisplayState(mode, isActive) {
+  displayMode = mode;
+  displayActive = isActive;
+  if (!isActive) {
+    targetProgress = 0;
+    currentProgress = 0;
+    mcTargetOffset = 0;
+    mcCurrentOffset = 0;
+    estimating = false;
+    mcEstimating = false;
+    stopAnimLoop();
+    var fillEl = document.getElementById('previewProgressFill');
+    var progressEl = document.getElementById('previewProgress');
+    if (fillEl) fillEl.style.width = '0%';
+    if (progressEl) progressEl.textContent = '0%';
+    applyPreviewScroll(0);
+    for (var i = 1; i <= 3; i++) {
+      var line = document.getElementById('previewCL' + i);
+      if (line && line.firstChild) line.firstChild.style.transform = '';
+    }
+  } else {
+    ensureAnimLoop();
+  }
+  updatePreviewBadge();
+}
+
+// --- Unified 60fps animation loop ---
+// Smoothly interpolates toward target, or self-drives when server is silent.
+function ensureAnimLoop() {
+  if (animRafId) return;
+  animLastTime = performance.now();
+  animRafId = requestAnimationFrame(animTick);
+}
+
+function stopAnimLoop() {
+  if (animRafId) {
+    cancelAnimationFrame(animRafId);
+    animRafId = null;
+  }
+}
+
+function animTick(timestamp) {
+  animRafId = null;
+  if (!displayActive) return;
+
+  var dt = Math.min((timestamp - animLastTime) / 1000, 0.1); // cap at 100ms
+  animLastTime = timestamp;
+
+  var serverSilent = (Date.now() - lastServerTime) > 600;
+
+  var isCredits = state.scrollMode === 'movieCredits';
+
+  if (isCredits) {
+    // --- Movie Credits: smooth horizontal scroll ---
+    if (serverSilent && state.isPlaying) {
+      // Self-drive: advance offset based on speed
+      var speed = state.scrollSpeed || 50;
+      var scale = getPreviewScale();
+      mcTargetOffset += (speed * scale / 30) * dt;
+      mcEstimating = true;
+    }
+    // Lerp toward target (snap for big jumps)
+    var diff = mcTargetOffset - mcCurrentOffset;
+    if (Math.abs(diff) < 0.5) {
+      mcCurrentOffset = mcTargetOffset;
+    } else if (Math.abs(diff) > mcSnapThreshold) {
+      mcCurrentOffset = mcTargetOffset; // instant snap
+    } else {
+      mcCurrentOffset += diff * Math.min(1, lerpSpeed * dt);
+    }
+    applyMovieCreditsScroll(mcCurrentOffset);
+  } else {
+    // --- Vertical scroll: smooth progress ---
+    if (serverSilent && state.isPlaying) {
+      // Self-drive: advance progress based on speed
+      var speed = state.scrollSpeed || 50;
+      var rate = speed / 3000;
+      targetProgress = Math.min(1.0, targetProgress + rate * dt);
+      estimating = true;
+    }
+    // Lerp toward target (snap for big jumps)
+    var diff = targetProgress - currentProgress;
+    if (Math.abs(diff) < 0.0005) {
+      currentProgress = targetProgress;
+    } else if (Math.abs(diff) > snapThreshold) {
+      currentProgress = targetProgress; // instant snap
+    } else {
+      currentProgress += diff * Math.min(1, lerpSpeed * dt);
+    }
+    applyPreviewScroll(currentProgress);
+
+    // Update progress display (throttled to avoid layout thrash)
+    if (estimating) {
+      var pct = Math.round(currentProgress * 100);
+      var progressEl = document.getElementById('previewProgress');
+      var fillEl = document.getElementById('previewProgressFill');
+      if (progressEl) progressEl.textContent = pct + '%';
+      if (fillEl) fillEl.style.width = pct + '%';
+    }
+  }
+
+  animRafId = requestAnimationFrame(animTick);
+}
+
+function applyMovieCreditsScroll(offset) {
+  var container = document.getElementById('previewContainer');
+  var laneW = container ? container.offsetWidth : 300;
+  for (var i = 1; i <= 3; i++) {
+    var line = document.getElementById('previewCL' + i);
+    if (line && line.firstChild) {
+      var lineOffset = offset + (i - 1) * laneW;
+      line.firstChild.style.transform = 'translate3d(' + (-lineOffset) + 'px,0,0)';
+    }
+  }
+}
+
+function updatePreviewBadge() {
+  var badge = document.getElementById('previewBadge');
+  if (!badge) return;
+
+  var modeLabel = displayMode === 'overlay' ? 'Overlay' : 'Toàn màn hình';
+
+  if (displayActive && state.isPlaying) {
+    badge.className = 'preview-badge live';
+    badge.textContent = '🔴 LIVE · ' + modeLabel;
+  } else if (displayActive && !state.isPlaying) {
+    badge.className = 'preview-badge idle';
+    badge.textContent = '⏸ Tạm dừng · ' + modeLabel;
+  } else {
+    badge.className = 'preview-badge idle';
+    badge.textContent = '⏸ Chờ trình chiếu';
+  }
+}
+
+function escapeHtml(text) {
+  var div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 }
 
 // Start

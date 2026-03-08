@@ -10,7 +10,8 @@ import '../models/prompter_settings.dart';
 import '../services/remote_server_service.dart';
 
 class PrompterScreen extends StatefulWidget {
-  const PrompterScreen({super.key});
+  final double initialProgress;
+  const PrompterScreen({super.key, this.initialProgress = 0.0});
 
   @override
   State<PrompterScreen> createState() => _PrompterScreenState();
@@ -32,6 +33,9 @@ class _PrompterScreenState extends State<PrompterScreen> with WindowListener {
   late PrompterSettings _settings;
   bool _suppressSettingsSync = false;
   StreamSubscription<String>? _remoteCommandSub;
+
+  // Scroll progress broadcasting for web live preview
+  Timer? _scrollProgressTimer;
 
   bool get _isDesktop => !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
 
@@ -58,6 +62,12 @@ class _PrompterScreenState extends State<PrompterScreen> with WindowListener {
       // Listen for remote seek commands
       final remoteService = Provider.of<RemoteServerService>(context, listen: false);
       _remoteCommandSub = remoteService.commandStream.listen(_onRemoteCommand);
+      remoteService.broadcastDisplayState(mode: 'fullscreen', isActive: true);
+      _startScrollProgressBroadcast();
+      // Resume from initial progress if provided
+      if (widget.initialProgress > 0.0) {
+        _applyInitialProgress(widget.initialProgress);
+      }
       _startScrolling();
     });
     
@@ -95,6 +105,19 @@ class _PrompterScreenState extends State<PrompterScreen> with WindowListener {
       case 'reset':
         _resetScroll();
         break;
+      case 'rewind':
+        if (_settings.scrollMode == ScrollMode.movieCredits) {
+          setState(() {
+            _movieCreditsOffset = (_movieCreditsOffset - 200).clamp(0.0, double.infinity);
+          });
+        } else if (_scrollController.hasClients) {
+          _scrollController.animateTo(
+            (_scrollController.offset - 200).clamp(0.0, _scrollController.position.maxScrollExtent),
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          );
+        }
+        break;
       case 'forward':
         if (_scrollController.hasClients) {
           _scrollController.animateTo(
@@ -122,9 +145,15 @@ class _PrompterScreenState extends State<PrompterScreen> with WindowListener {
   @override
   void dispose() {
     _scrollTimer?.cancel();
+    _scrollProgressTimer?.cancel();
     _scrollController.dispose();
     _settings.removeListener(_onRemoteSettingsChanged);
     _remoteCommandSub?.cancel();
+    // Notify web clients fullscreen stopped
+    try {
+      final remoteService = Provider.of<RemoteServerService>(context, listen: false);
+      remoteService.broadcastDisplayState(mode: 'fullscreen', isActive: false);
+    } catch (_) {}
     // Restore system UI on mobile
     if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
@@ -222,6 +251,48 @@ class _PrompterScreenState extends State<PrompterScreen> with WindowListener {
     });
   }
 
+  /// Apply initial scroll progress (used when resuming from another mode)
+  void _applyInitialProgress(double progress) {
+    final settings = Provider.of<PrompterSettings>(context, listen: false);
+    if (settings.scrollMode == ScrollMode.movieCredits) {
+      // Will be applied after layout computes _mcCycleHeight
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _mcCycleHeight > 0) {
+          setState(() {
+            _movieCreditsOffset = progress * _mcCycleHeight;
+          });
+        }
+      });
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _scrollController.hasClients) {
+          final max = _scrollController.position.maxScrollExtent;
+          _scrollController.jumpTo(max * progress);
+        }
+      });
+    }
+  }
+
+  /// Periodically broadcast scroll progress to web remote preview (~4 Hz)
+  void _startScrollProgressBroadcast() {
+    _scrollProgressTimer?.cancel();
+    _scrollProgressTimer = Timer.periodic(const Duration(milliseconds: 250), (_) {
+      if (!mounted) return;
+      final remoteService = Provider.of<RemoteServerService>(context, listen: false);
+      if (!remoteService.isRunning) return;
+
+      double progress = 0.0;
+      final settings = Provider.of<PrompterSettings>(context, listen: false);
+      if (settings.scrollMode == ScrollMode.movieCredits) {
+        progress = _mcCycleHeight > 0 ? (_movieCreditsOffset % _mcCycleHeight) / _mcCycleHeight : 0.0;
+      } else if (_scrollController.hasClients) {
+        final max = _scrollController.position.maxScrollExtent;
+        progress = max > 0 ? _scrollController.offset / max : 0.0;
+      }
+      remoteService.broadcastScrollProgress(progress, mode: 'fullscreen');
+    });
+  }
+
   void _toggleControls() {
     setState(() {
       _showControls = !_showControls;
@@ -287,8 +358,9 @@ class _PrompterScreenState extends State<PrompterScreen> with WindowListener {
             child: Padding(
               padding: EdgeInsets.symmetric(horizontal: settings.paddingHorizontal),
               child: SizedBox(
-                height: lineHeight * 3,
+                height: constraints.maxHeight * 0.5,
                 child: Column(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
                     // Line 1 (top) — oldest text, exits here
                     _buildCreditsLine(repeatedText, textStyle, lineWidth,
@@ -368,7 +440,7 @@ class _PrompterScreenState extends State<PrompterScreen> with WindowListener {
                             physics: const NeverScrollableScrollPhysics(),
                             padding: EdgeInsets.symmetric(
                               horizontal: settings.paddingHorizontal,
-                              vertical: MediaQuery.of(context).size.height / 2,
+                              vertical: MediaQuery.of(context).size.height / 3,
                             ),
                             child: Text(
                               settings.text,
@@ -380,11 +452,12 @@ class _PrompterScreenState extends State<PrompterScreen> with WindowListener {
                 ),
 
                 // Center line indicator
-                Center(
+                Positioned(
+                  top: MediaQuery.of(context).size.height / 3,
+                  left: 0,
                   child: Container(
                     height: 2,
                     width: 50,
-                    margin: const EdgeInsets.only(right: 16),
                     alignment: Alignment.centerRight,
                     child: Container(
                       color: Color.fromRGBO(

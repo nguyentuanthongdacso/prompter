@@ -26,6 +26,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   late TextEditingController _textController;
   bool _hasOverlayPermission = false;
   bool _isOverlayActive = false;
+  bool _isFullscreenActive = false;
   StreamSubscription<String>? _remoteCommandSub;
   Timer? _overlayPollTimer;
   String _currentFontFilePath = '';
@@ -142,9 +143,11 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         break;
       case 'apply_text':
         final remoteService = Provider.of<RemoteServerService>(context, listen: false);
+        final s = Provider.of<PrompterSettings>(context, listen: false);
         _overlayTextOverride = remoteService.remoteText;
+        // Update settings.text so state_update broadcasts to web (live preview)
+        s.setText(remoteService.remoteText);
         if (_isOverlayActive) {
-          final s = Provider.of<PrompterSettings>(context, listen: false);
           _sendOverlayUpdate(s);
         }
         break;
@@ -156,6 +159,11 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         }
         break;
       case 'reset':
+        if (_isOverlayActive) {
+          NativeOverlayService.resetToStart();
+        }
+        break;
+      case 'rewind':
         if (_isOverlayActive) {
           NativeOverlayService.resetScroll();
         }
@@ -187,12 +195,20 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       if (!running) {
         setState(() => _isOverlayActive = false);
         _stopOverlayPolling();
+        // Notify web clients overlay stopped
+        if (mounted) {
+          final remoteService = Provider.of<RemoteServerService>(context, listen: false);
+          remoteService.broadcastDisplayState(mode: 'overlay', isActive: false);
+        }
         return;
       }
       final overlayState = await NativeOverlayService.getOverlayState();
       if (overlayState != null && mounted) {
         final settings = Provider.of<PrompterSettings>(context, listen: false);
-        // Temporarily remove listener to avoid feedback loop
+        final remoteService = Provider.of<RemoteServerService>(context, listen: false);
+
+        // Suppress state_update broadcasts during overlay sync to avoid DOM thrash on web
+        remoteService.suppressBroadcast = true;
         settings.removeListener(_onSettingsChanged);
         
         final speed = overlayState['speed'] as int?;
@@ -205,8 +221,16 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         }
         
         settings.addListener(_onSettingsChanged);
+        remoteService.suppressBroadcast = false;
+
+        // Broadcast only scroll progress (lightweight, no DOM rebuild)
+        final rawProgress = overlayState['scrollProgress'];
+        final scrollProgress = (rawProgress is num) ? rawProgress.toDouble() : 0.0;
+        remoteService.broadcastScrollProgress(scrollProgress, mode: 'overlay');
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[LivePreview] _syncOverlayStateToApp error: $e');
+    }
   }
 
   Future<void> _checkOverlayPermission() async {
@@ -221,7 +245,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   void _startOverlayPolling() {
     _overlayPollTimer?.cancel();
-    _overlayPollTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+    _overlayPollTimer = Timer.periodic(const Duration(milliseconds: 200), (_) {
       if (_isOverlayActive && mounted) {
         _syncOverlayStateToApp();
       }
@@ -258,23 +282,37 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     super.dispose();
   }
 
-  void _startPrompter({bool fromRemote = false}) {
+  Future<void> _startPrompter({bool fromRemote = false}) async {
+    final remoteService = Provider.of<RemoteServerService>(context, listen: false);
+    final settings = Provider.of<PrompterSettings>(context, listen: false);
+
+    // Stop overlay if running to avoid dual-mode conflict
+    double resumeProgress = 0.0;
+    if (_isOverlayActive) {
+      resumeProgress = remoteService.lastScrollProgress;
+      await NativeOverlayService.hideOverlay();
+      setState(() => _isOverlayActive = false);
+      _stopOverlayPolling();
+      remoteService.broadcastDisplayState(mode: 'overlay', isActive: false);
+    }
+
     if (fromRemote) {
-      // Use web remote text
-      final remoteService = Provider.of<RemoteServerService>(context, listen: false);
-      final settings = Provider.of<PrompterSettings>(context, listen: false);
       settings.setText(remoteService.remoteText);
     } else {
-      // Use app's text
-      final settings = Provider.of<PrompterSettings>(context, listen: false);
       settings.setText(_textController.text);
     }
-    Navigator.push(
+
+    setState(() => _isFullscreenActive = true);
+    await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => const PrompterScreen(),
+        builder: (context) => PrompterScreen(initialProgress: resumeProgress),
       ),
     );
+    // Fullscreen route was popped (user closed it or mode switch)
+    if (mounted) {
+      setState(() => _isFullscreenActive = false);
+    }
   }
 
   Future<void> _startOverlay({bool fromRemote = false}) async {
@@ -283,11 +321,21 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       if (!_hasOverlayPermission) return;
     }
 
+    final remoteService = Provider.of<RemoteServerService>(context, listen: false);
     final settings = Provider.of<PrompterSettings>(context, listen: false);
 
+    // Stop fullscreen if running to avoid dual-mode conflict
+    double resumeProgress = 0.0;
+    if (_isFullscreenActive) {
+      resumeProgress = remoteService.lastScrollProgress;
+      // Pop the fullscreen route — its dispose() will clean up timers/broadcasts
+      if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+      // _isFullscreenActive will be set to false when the push Future completes
+    }
+
     if (fromRemote) {
-      // Use web remote text for overlay
-      final remoteService = Provider.of<RemoteServerService>(context, listen: false);
       _overlayTextOverride = remoteService.remoteText;
     } else {
       // Use app's text for overlay
@@ -322,11 +370,14 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       overlayHeight: settings.overlayHeight,
       scrollMode: settings.scrollMode.index,
       fontFilePath: _currentFontFilePath,
+      initialProgress: resumeProgress,
     );
     
     setState(() => _isOverlayActive = true);
     // Native overlay auto-starts scrolling, sync isPlaying state
     settings.setPlaying(true);
+    // Notify web clients that overlay is active
+    remoteService.broadcastDisplayState(mode: 'overlay', isActive: true);
     // Start polling native overlay state to sync play/pause back to web UI
     _startOverlayPolling();
     

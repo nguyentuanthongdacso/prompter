@@ -56,6 +56,7 @@ class MainActivity : FlutterActivity() {
                     val overlayHeight = call.argument<Double>("overlayHeight")?.toFloat() ?: 150f
                     val scrollMode = (call.argument<Number>("scrollMode")?.toInt()) ?: 0
                     val fontFilePath = call.argument<String>("fontFilePath") ?: ""
+                    val initialProgress = call.argument<Double>("initialProgress") ?: 0.0
                     
                     val intent = Intent(this, PrompterOverlayService::class.java).apply {
                         action = PrompterOverlayService.ACTION_SHOW
@@ -76,6 +77,7 @@ class MainActivity : FlutterActivity() {
                         putExtra(PrompterOverlayService.EXTRA_OVERLAY_HEIGHT, overlayHeight)
                         putExtra(PrompterOverlayService.EXTRA_SCROLL_MODE, scrollMode)
                         putExtra(PrompterOverlayService.EXTRA_FONT_FILE_PATH, fontFilePath)
+                        putExtra(PrompterOverlayService.EXTRA_INITIAL_PROGRESS, initialProgress)
                     }
                     
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -156,7 +158,8 @@ class MainActivity : FlutterActivity() {
                     val state = mapOf(
                         "speed" to PrompterOverlayService.currentSpeed,
                         "textColor" to PrompterOverlayService.currentColor,
-                        "isPlaying" to PrompterOverlayService.currentlyPlaying
+                        "isPlaying" to PrompterOverlayService.currentlyPlaying,
+                        "scrollProgress" to PrompterOverlayService.currentScrollProgress
                     )
                     result.success(state)
                 }
@@ -177,6 +180,14 @@ class MainActivity : FlutterActivity() {
                 "overlayResetScroll" -> {
                     val intent = Intent(this, PrompterOverlayService::class.java).apply {
                         action = PrompterOverlayService.ACTION_SCROLL_UP
+                    }
+                    startService(intent)
+                    result.success(true)
+                }
+
+                "overlayResetToStart" -> {
+                    val intent = Intent(this, PrompterOverlayService::class.java).apply {
+                        action = PrompterOverlayService.ACTION_RESET_TO_START
                     }
                     startService(intent)
                     result.success(true)

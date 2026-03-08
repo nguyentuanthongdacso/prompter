@@ -48,6 +48,7 @@ class PrompterOverlayService : Service() {
     private var movieCreditsTextViews = mutableListOf<TextView>()
     private var movieCreditsSingleText = ""
     private var currentFontFilePath = ""
+    private var pendingInitialProgress = 0.0  // applied once on first scroll frame
     
     // Control panel position for dragging
     private var controlX = 0
@@ -70,6 +71,7 @@ class PrompterOverlayService : Service() {
         const val ACTION_SPEED_DOWN = "com.example.prompter.SPEED_DOWN"
         const val ACTION_SCROLL_UP = "com.example.prompter.SCROLL_UP"
         const val ACTION_SCROLL_DOWN = "com.example.prompter.SCROLL_DOWN"
+        const val ACTION_RESET_TO_START = "com.example.prompter.RESET_TO_START"
         
         const val EXTRA_TEXT = "text"
         const val EXTRA_FONT_SIZE = "fontSize"
@@ -88,6 +90,7 @@ class PrompterOverlayService : Service() {
         const val EXTRA_OVERLAY_HEIGHT = "overlayHeight"
         const val EXTRA_SCROLL_MODE = "scrollMode"
         const val EXTRA_FONT_FILE_PATH = "fontFilePath"
+        const val EXTRA_INITIAL_PROGRESS = "initialProgress"
         
         // Static state for overlay→app sync
         var isRunning = false
@@ -97,6 +100,8 @@ class PrompterOverlayService : Service() {
         var currentColor = Color.BLACK
             private set
         var currentlyPlaying = false
+            private set
+        var currentScrollProgress = 0.0
             private set
     }
     
@@ -161,6 +166,7 @@ class PrompterOverlayService : Service() {
                 currentColor = textColor
                 scrollMode = scrollModeVal
                 currentFontFilePath = intent.getStringExtra(EXTRA_FONT_FILE_PATH) ?: ""
+                pendingInitialProgress = intent.getDoubleExtra(EXTRA_INITIAL_PROGRESS, 0.0)
                 showOverlay(text, fontSize, textColor, bgColor, mirror, fontFamily, isBold, isItalic, lineHeight, textAlign, opacity, paddingH, overlayPos, overlayHeight, scrollModeVal)
                 startForeground(NOTIFICATION_ID, createNotification())
             }
@@ -329,6 +335,7 @@ class PrompterOverlayService : Service() {
             ACTION_SPEED_DOWN -> speedDown()
             ACTION_SCROLL_UP -> scrollUp()
             ACTION_SCROLL_DOWN -> scrollDown()
+            ACTION_RESET_TO_START -> resetToStart()
         }
         return START_STICKY
     }
@@ -352,7 +359,7 @@ class PrompterOverlayService : Service() {
         if (scrollModeParam == 1) {
             textOverlayView = createMovieCreditsView(
                 text, fontSize, textColor, bgColor, mirror, fontFamily,
-                isBold, isItalic, lineHeight, textAlign, opacity, paddingH
+                isBold, isItalic, lineHeight, textAlign, opacity, paddingH, heightPx
             )
         } else {
             textOverlayView = createTextOverlayView(
@@ -651,16 +658,33 @@ class PrompterOverlayService : Service() {
     
     private fun startRegularScrolling() {
         scrollRunnable = object : Runnable {
+            private var appliedInitial = false
             override fun run() {
                 if (isPlaying) {
                     (textOverlayView as? ScrollView)?.let { scrollView ->
                         val currentY = scrollView.scrollY
                         val maxY = scrollView.getChildAt(0)?.height?.minus(scrollView.height) ?: 0
+
+                        // Apply initial progress on first frame with valid layout
+                        if (!appliedInitial && pendingInitialProgress > 0.0 && maxY > 0) {
+                            val targetY = (maxY * pendingInitialProgress).toInt().coerceIn(0, maxY)
+                            scrollView.scrollTo(0, targetY)
+                            pendingInitialProgress = 0.0
+                            appliedInitial = true
+                            currentScrollProgress = targetY.toDouble() / maxY.toDouble()
+                            scrollHandler?.postDelayed(this, 33L)
+                            return
+                        }
+                        appliedInitial = true
                         
+                        // Update scroll progress for app sync
+                        currentScrollProgress = if (maxY > 0) currentY.toDouble() / maxY.toDouble() else 0.0
+
                         if (currentY < maxY) {
                             val scrollStep = (scrollSpeed / 20).coerceIn(1, 15)
                             scrollView.scrollBy(0, scrollStep)
                         } else {
+                            currentScrollProgress = 1.0
                             isPlaying = false
                             controlPanelView?.findViewWithTag<TextView>("playPauseBtn")?.text = "▶"
                             return
@@ -674,6 +698,11 @@ class PrompterOverlayService : Service() {
     }
     
     private fun startMovieCreditsScrolling() {
+        // Apply initial progress for movie credits
+        if (pendingInitialProgress > 0.0 && movieCreditsSingleWidth > 0) {
+            movieCreditsOffset = (movieCreditsSingleWidth * pendingInitialProgress).toFloat()
+            pendingInitialProgress = 0.0
+        }
         scrollRunnable = object : Runnable {
             override fun run() {
                 if (isPlaying) {
@@ -682,6 +711,8 @@ class PrompterOverlayService : Service() {
                         if (movieCreditsOffset >= movieCreditsSingleWidth) {
                             movieCreditsOffset -= movieCreditsSingleWidth
                         }
+                        // Update scroll progress for app sync
+                        currentScrollProgress = movieCreditsOffset.toDouble() / movieCreditsSingleWidth.toDouble()
                         updateMovieCreditsPositions()
                     }
                     scrollHandler?.postDelayed(this, 33L)
@@ -740,6 +771,16 @@ class PrompterOverlayService : Service() {
         } else {
             (textOverlayView as? ScrollView)?.smoothScrollBy(0, 200)
         }
+    }
+
+    private fun resetToStart() {
+        if (scrollMode == 1) {
+            movieCreditsOffset = 0f
+            updateMovieCreditsPositions()
+        } else {
+            (textOverlayView as? ScrollView)?.scrollTo(0, 0)
+        }
+        currentScrollProgress = 0.0
     }
     
     private fun changeTextColor(color: Int) {
@@ -1016,7 +1057,8 @@ class PrompterOverlayService : Service() {
         mirror: Boolean = false, fontFamily: String = "Roboto",
         isBold: Boolean = false, isItalic: Boolean = false,
         lineHeight: Float = 1.5f, textAlign: Int = 1,
-        opacity: Float = 0f, paddingH: Float = 20f
+        opacity: Float = 0f, paddingH: Float = 20f,
+        overlayHeightPx: Int = 0
     ): View {
         val density = resources.displayMetrics.density
         val paddingPx = (paddingH * density).toInt()
@@ -1061,7 +1103,10 @@ class PrompterOverlayService : Service() {
         // Lane stride = line height * multiplier, so lineHeight controls gap between lanes
         val laneStride = (singleLineH * lineHeight).toInt()
         
-        // Container with 3 lanes (clipped)
+        // Container with 3 lanes (clipped), centered vertically
+        val totalLanesHeight = 2 * laneStride + singleLineH
+        val topOffset = if (overlayHeightPx > 0) ((overlayHeightPx - totalLanesHeight) / 2).coerceAtLeast(0) else 0
+        
         val container = android.widget.FrameLayout(this).apply {
             setBackgroundColor(finalBgColor)
             clipChildren = true
@@ -1082,7 +1127,7 @@ class PrompterOverlayService : Service() {
                 android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
                 singleLineH
             )
-            laneParams.topMargin = i * laneStride
+            laneParams.topMargin = topOffset + i * laneStride
             lane.layoutParams = laneParams
             
             // Single-line wide TextView inside each lane
